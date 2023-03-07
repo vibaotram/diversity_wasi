@@ -1,0 +1,64 @@
+fastq_dir: "/shared/projects/elai_most/data/fastq/fastq_2019_clean"
+output_dir: "/shared/projects/afrob_seq/wgs_snp/vcf_bgi_2021/gbp_output"
+ref: "/shared/projects/vietcaf/data/reference/CC1.8_v2_pseudomolecule_cat.fa"
+
+## quality control before processing
+fastqc:
+    params: ""
+    threads: 24
+
+## pre-processing if neccessary
+# fastp
+
+## variant calling from fastq
+bwa_mem:
+    params: ""
+    threads: 24
+    mem: "60G"
+
+
+picard_SortSam:
+    params: "-SORT_ORDER coordinate -VALIDATION_STRINGENCY SILENT" # index reference
+    mem: "20G"
+
+samtools_view:
+    params: "-h -b -f 0x02" # convert sam to bam and filter mapping
+    threads: 8
+    mem: "20G"
+
+MarkDuplicates:
+    params: "--remove-sequencing-duplicates false --read-validation-stringency SILENT"
+    threads: 4
+    mem: "20G"
+
+HaplotypeCaller:
+    params: "--read-filter GoodCigarReadFilter --max-alternate-alleles 10 --output-mode EMIT_ALL_ACTIVE_SITES"
+    threads: 4
+    mem: "80G"
+
+CombineGVCFs:
+    params: ""
+    mem: ""
+
+GenomicsDBImport:
+    params: "--batch-size 20"
+    threads: 24
+    mem: "100G"
+
+GenotypeGVCFs:
+    params: ""
+    mem: "100G"
+
+## stats before and/or after variant filtration
+
+## variant filtration
+gatk_VariantFiltration:
+    params: "--cluster-size 4 --cluster-window-size 10 --filter-name 'LOW-QUAL' --filter-expression 'QUAL<200'"
+    suffix: "_quality"
+gatk_SelectVariants:
+    params: "--restrict-alleles-to BIALLELIC --select-type-to-include SNP"
+    suffix: "_SNPbiallelic"
+vcftools:
+    params: "--min-meanDP 10 --max-meanDP 100 --max-missing 0.85" # and remove singletons, doubletons
+    suffix: "_depth_missing_singletons"
+filtration_mem: ""
