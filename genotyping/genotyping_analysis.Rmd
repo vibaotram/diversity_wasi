@@ -1,0 +1,2187 @@
+---
+title: "genotyping analysis"
+author: "Tram"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(message = FALSE)
+knitr::opts_chunk$set(warning = FALSE)
+knitr::opts_knit$set(root.dir = "/home/baotram/phd/robusta")
+# knitr::opts_chunk$set(cache = TRUE, cache.path = "./R_data/cache/")
+library(readxl)
+library(reshape2)
+# library(dplyr)
+library(tidyverse)
+# library(tibble)
+library(magrittr)
+# library(ggplot2)
+# library(tibble)
+library(adegenet)
+library(vcfR)
+library(LEA)
+library(ape)
+library(poppr)
+library(ggdendro)
+library(viridis)
+library(treeio)
+library(ggtree)
+library(gplots)
+library(GenomicRanges)
+library(Rsamtools)
+library(karyoploteR)
+library(Metrics)
+# library(corehunter)
+library(DT)
+library(phangorn)
+library(aplot)
+library(PopGenReport)
+library(vegan)
+library(ggvenn)
+library(ggpubr)
+library(DBI)
+library(genio)
+library(ggplotify)
+library(scales)
+```
+
+```{r functions, include=FALSE}
+genind2geno <- function(genind, ref_allele = NULL, NA.code = 9) {
+  stopifnot(class(genind) == "genind")
+  raw_geno <- genind2df(genind, usepop = F)
+  if (is.null(ref_allele)) {
+    ref_allele <- apply(raw_geno, 2, function(i) na.omit(unique(unlist(strsplit(i, ""))))[1])
+  }
+  stopifnot(nLoc(genind) == length(ref_allele))
+  geno <- raw_geno
+  for(c in 1:ncol(geno)) {
+    ref <- ref_allele[c]
+    geno[,c] <- sapply(raw_geno[,c], function(g) {
+      if (is.na(g) || g == "NA") {
+        n <- NA.code
+      } else {
+        n <- length(grep(ref, unlist(strsplit(g, "")), invert = T))
+      }
+      return(n)
+    }, USE.NAMES = F)
+  }
+  return(geno)
+}
+
+snmf_az <- function(genind, k_values, snmf_rep = 100, CPUs = 2, k_plot) {
+  snmf_dir <- tempfile()
+  dir.create(snmf_dir, showWarnings = F)
+  snmf_geno_file <- file.path(snmf_dir, "all_gt.geno")
+  write.geno(genind2geno(genind, NA.code = 9), snmf_geno_file)
+  snmf_dat <- snmf(snmf_geno_file, 
+               K = k_values, 
+               repetitions = snmf_rep, CPU = CPUs, 
+               entropy = T, seed = 987654321,
+               project = "new")
+  plot(snmf_dat)
+  
+  all_prop_list <- sapply(k_plot, function(k) {
+    prop_5 <- Q(snmf_dat, K = k, run = which.min(cross.entropy(snmf_dat, K = k))) %>% as.data.frame()
+    # prop_5$code <- indNames(genind)
+    prop_5$code <- genind@strata$code
+    prop_5 <- left_join(prop_5, genind@strata, by = "code")
+    ind_order <- LEA::barchart(snmf_dat, K = k, run = which.min(cross.entropy(snmf_dat, K = k)), plot = F)
+    # prop_5 <- prop_5[ind_order$order,]
+    # prop <- prop[id_ord$order,]
+    prop_5 <- pivot_longer(prop_5, 
+                           cols = matches("V\\d+"), 
+                           names_to = "ancestry", 
+                           values_to = "proportion")
+    prop_5$k <- k
+    prop_5$code <- factor(prop_5$code, levels = prop_5$code[ind_order$order], ordered = F)
+    return(prop_5)
+  }, USE.NAMES = T, simplify = F)
+  
+  all_prop <- do.call(rbind, all_prop_list)
+  
+  # all snmf results for k = 5 to 8
+  p <- ggplot(all_prop) +
+    facet_wrap(vars(k), ncol = 1) +
+    geom_col(aes(x = code, y = proportion, fill = ancestry), width = 1, position = position_stack()) + 
+    scale_fill_viridis_d(option = "B") +
+    theme(axis.text.x = element_text(angle = 90, h = 1, v = .5),
+          panel.background = element_rect(fill = "white"), 
+          panel.grid = element_line(color = "gray", size = .1)) +
+    xlab("individuals") +
+    ylab("ancestry proportion")
+  print(p)
+  
+  return(all_prop_list)
+}
+```
+
+
+# Check DNA concentration
+LGC made a mistake in mapping the names on 1 plate
+
+```{r}
+platemap_flie <- "./genotyping/lgc_results/platemap-IRD-35-38.xlsx"
+platemap <- do.call(rbind, lapply(1:4, function(i) {
+  if (i == 1) {
+    rg <- "A2:M10"
+  } else if (i == 2) {
+    rg <- "A15:M23"
+  } else if (i == 3) {
+    rg <- "A27:M35"
+  } else if (i == 4) {
+    rg <- "A39:M47"
+  } else stop()
+  plate <- read_xlsx(platemap_flie, range = rg)
+  plate <- reshape2::melt(plate, id.vars = "...1")
+  colnames(plate) <- c("row", "col", "Sample name")
+  plate <- plate %>% rowwise() %>% 
+      mutate(Plate = paste0("P", sprintf("%02d", i)),
+             Well = paste0(row, sprintf("%02d", as.numeric(col))),
+             "Plate name" = i)
+  return(plate)
+}))
+
+platemap <- platemap %>% 
+  rownames_to_column("#") %>% 
+  dplyr::select("#", Plate, Well, "Plate name", "Sample name") %>% 
+  mutate("Sample identifier" = paste0(`Plate name`, `Sample name`))
+
+```
+
+Check DNA concentration
+```{r}
+qc_report_file <- "./genotyping/lgc_results/NGS5067_B1_P1-P5_Extraction_QC_Report.xlsx"
+sample_map <- read_xlsx(qc_report_file, sheet = 1, skip = 14)
+sample_map <- rbind(platemap, sample_map %>% filter(`Plate name` == 5))
+
+conc <- do.call(rbind, lapply(2:6, function(i) {
+  plate <- read_xlsx(qc_report_file, sheet = i, range = "A61:M69")
+  plate <- reshape2::melt(plate)
+  colnames(plate) <- c("row", "col", "conc")
+  plate <- plate %>% rowwise() %>% 
+    mutate(Plate = paste0("P", sprintf("%02d", i-1)),
+           Well = paste0(row, sprintf("%02d", as.numeric(col))))
+  return(plate)
+  }))
+sample_conc <- merge(sample_map, conc[c("conc", "Plate", "Well")], by = c("Plate", "Well"))
+sample_conc <- sample_conc %>% dplyr::select(colnames(sample_map), "conc") %>% mutate(conc = sprintf("%.02f", conc))
+dna_conc_report <- "./genotyping/lgc_results/dna_concentration.tsv"
+write.table(sample_conc, dna_conc_report, quote = F, row.names = F, sep = "\t")
+```
+
+# Genotyping analysis
+
+I selected 3002 SNPs but in the end, there are only 279 SNPs that could be used for primer design (filtered by LGC).  
+The data is looking really good with 88% reads used in genotyping, 279 polymorphic targets, and 2482x coverage.  
+9 failed samples, 11 failed SNPs.
+
+
+TO-DO:  
+    1. check missing individuals (VN or not)  
+    2. check the duplicated individuals (same genotype or not)  
+    3. check plate quality  
+    4. snmf, hca  
+
+## Data
+
+### genotyping
+138 inds, 268 SNPs
+```{r, include=FALSE, eval=FALSE}
+passport_file <- "accessions/passport_metadata.xlsx"
+accession <- read_excel(passport_file, sheet = "passport")
+```
+
+```{r passport}
+# information of VN accessions
+passport_file <- "accessions/Robusta_WASI_update_14042021.xlsx"
+accession <- read_excel(passport_file, sheet = 1)
+accession %>% 
+  filter(species == "canephora") %>% 
+  group_by(nematode_resistance, drought_tolerance, high_yield, high_quality) %>% 
+  summarise("number of plants" = n()) %>% 
+  knitr::kable()
+accession %>% 
+  group_by(species) %>% 
+  summarise("number of plants" = n()) %>% 
+  knitr::kable()
+```
+
+
+```{r plate_design}
+# accession code corresponding to plate design
+plate_design <- "./genotyping/lgc_results/NGS5067_B1_P1-P5_Extraction_QC_Report_corrected_names.xlsx"
+plate <- read_excel(plate_design, sheet = "Conc - Summary")
+```
+
+
+```{r genotyping_result}
+# read kasp genotyping results
+genotyping_result <- "./genotyping/lgc_results/NGS5067_Variant_Calling_Spreadsheet_27Aug2021.xlsx"
+all_geno <- read_excel(genotyping_result)
+all_geno <- na.omit(all_geno) %>% mutate(CHROM_POS = gsub("\\.", "_", CHROM_POS))
+# filter PASS SNPs
+all_geno <- all_geno %>% 
+  # filter(nchar(ALT) == 1) %>% 
+  filter(`SNP called in >85% of the samples` == "PASS")
+# new variants detected by kasp
+strange_snps <- all_geno %>% 
+  filter(nchar(ALT) != 1) %>% 
+  dplyr::select(CHROM_POS, CHROM, POS, REF, ALT, AF)
+# extract only genotyping columns
+geno <- all_geno %>% 
+  column_to_rownames("CHROM_POS") %>% 
+  dplyr::select(starts_with("GT_"))
+# rename columns by `code_plate`
+colnames(geno) <- sapply(colnames(geno), function(n) {
+  id <- gsub("GT_P.*-.*_S", "", n)
+  # name <- plate$`Sample name`[plate$`#` == id]
+  name <- paste(plate$code[plate$`#` == id], plate$Plate[plate$`#` == id], sep = "_")
+  return(name)
+})
+# rename duplicated columns `code_plate_i`
+colnames(geno) <- sapply(1:length(colnames(geno)), function(i) {
+  nb <- which(colnames(geno) == colnames(geno)[i])
+  if (length(nb) == 1) {
+    return( colnames(geno)[i])
+  } else {
+    return(paste(colnames(geno)[i], which(nb == i), sep = "_"))
+  }
+})
+```
+
+```{r save_list_of_SNP, include=FALSE, eval=FALSE}
+snp_3k_file <- "genotyping/snp_panels/final_3020_SNPs.tsv"
+snp_3k_info <- read.delim(snp_3k_file)
+snp_268_info <- snp_3k_info %>% filter(ID %in% gsub("CC1_8_", "CC1.8.", all_geno$CHROM_POS)) %>% dplyr::select(CHROM, POS, ID, REF, ALT, sequence)
+write.table(snp_268_info, "genotyping/snp_panels/final_268_SNPs.tsv", row.names = F)
+```
+
+
+```{r sample_gt}
+# remove additional genotypes from plate P05 because they are not our data
+sample_gt <- geno %>% dplyr::select(!ends_with("P05"))
+# code missing data as NA
+sample_gt[sample_gt == "."] <- NA
+# save info of all genotyped accessions (including reference) to be used for genind object
+sample_info <- data.frame(id= colnames(sample_gt), 
+                          code = gsub("_.+", "", colnames(sample_gt)),
+                          source = "sample")
+sample_info <- left_join(sample_info, accession, by = "code",)
+# duplicates in the kasp genotyping
+dup_ind <- colnames(sample_gt)[duplicated(gsub("_.+", "", colnames(sample_gt)))]
+dup_ind <- gsub("_.+", "", dup_ind)
+# dup_ind <- unique(dup_ind)
+```
+
+Distribution of SNPs on genome
+```{r snp_distribution, fig.height=10, fig.width=15}
+# snp positions
+geno_snp <- GRanges(seqnames = all_geno$CHROM, ranges = IRanges(start = all_geno$POS, end = all_geno$POS))
+
+# genome
+genome_fa <- "./reference/CC1.8_v2_pseudomolecule_cat.fa"
+genome <- scanFa(genome_fa)
+genome <- genome[grepl("Chr", names(genome))] # remove contigs
+names(genome) <- gsub(" .+", "", names(genome))
+genome_GR <- GRanges(seqnames = names(genome), ranges = IRanges(start = 1, end = width(genome)))
+
+# png(file = "./genotyping/lgc_results/snp_distributions.png", width = 1200, height = 700)
+gkp <- plotKaryotype(genome = genome_GR, plot.type = 1) 
+# kpDataBackground(gkp, data.panel ="ideogram")
+kpAddBaseNumbers(gkp, tick.dist = 2e7, add.units = T)
+kpPlotRegions(gkp, data = geno_snp, data.panel = "ideogram", col = "black", avoid.overlapping = T)
+kpAddMainTitle(gkp, "Distribution of 268 genotyped SNPs in the genome")
+# dev.off()
+```
+
+
+### sequencing
+65 inds: 55 references + 10 TRs  
+```{r reference_gt}
+# get reference genotypes from filered vcf file (3020 SNPs)
+ref_vcf <- "./genotyping/ref_genotypes/vietcaf_final_canephora_SNPs_missing_maf_filtered_40kb_thin.recode.vcf"
+ref_vcfR <- read.vcfR(ref_vcf, verbose = F)# reference (sequencing)
+### substitute "." in CHROM column to be able to convert vcfR to genind
+ref_vcfR@fix[,1] <- gsub("\\.", "_", ref_vcfR@fix[,1])
+seq_ref_genind <- vcfR2genind(ref_vcfR, return.alleles = T)
+seq_ref_genind <- seq_ref_genind[loc = rownames(geno)]
+
+ref_info_file <- "./test_10_clones/sequence_info_final.tsv"
+ref_info <- read.delim(ref_info_file, header = T, stringsAsFactors = F)
+ref_info %<>% mutate(code = paste(code, group, sep = "_"))
+```
+
+
+There are some variants do not present in the sequencing data
+```{r}
+# compare the new variants with the biallelic variants
+bi_snp <- as.data.frame(ref_vcfR@fix) %>%
+  filter(CHROM %in% strange_snps$CHROM | POS %in% strange_snps$POS) %>%
+  dplyr::select(CHROM, POS, REF, ALT)
+cat("new variants in genotyping data")
+knitr::kable(strange_snps)
+cat("variants in sequencing data")
+knitr::kable(bi_snp)
+```
+
+
+#### array
+119 inds, 5k SNPs
+
+```{r array_genotype}
+# get the genotypes from SNP array (5k can SNPs)
+can_array_file <- "./genotyping/snp_panels/canephora-array-genotypes.xlsx"
+can_array <- read_excel(can_array_file, sheet = "119-genotypes-5575-SNP")
+# can_array <- xlsx::read.xlsx(can_array_file, sheetName = "119-genotypes-5575-SNP", startRow = 6, header = T)
+can_array <- can_array[-c(1:5),-2] %>% 
+  column_to_rownames("Name") 
+array_ind <- rownames(can_array)
+
+# rename the loci using new mapping
+array_snp_info <- "./genotyping/snp_panels/final_3020_SNPs.tsv"
+array_snp <- read.delim(array_snp_info)
+array_snp$ID <- gsub("\\.", "_", array_snp$ID)
+colnames(can_array) <- sapply(colnames(can_array), function(n) array_snp$ID[array_snp$can_array == n])
+can_array <- can_array %>% dplyr::select(rownames(geno))
+
+# convert the array genotypes (1, 2, 3) based on the genotype of the homozygous reference
+ref <- "HD-200-094"
+can_array <- apply(can_array, 2, function(g) {
+  ng <- abs(as.numeric(g)-as.numeric(g[ref]))
+  return(ng)
+  })
+rownames(can_array) <- array_ind
+
+array_gt <- do.call(rbind, lapply(1:ncol(can_array), function(i) {
+  REF <- array_snp$REF[array_snp$ID == colnames(can_array)[i]]
+  ALT <- array_snp$ALT[array_snp$ID == colnames(can_array)[i]]
+  array_gt <- can_array[,i]
+  array_gt[array_gt == 0] <- paste(REF, REF, sep = "/")
+  array_gt[array_gt == 1] <- paste(REF, ALT, sep = "/")
+  array_gt[array_gt == 2] <- paste(ALT, ALT, sep = "/")
+  gt <- t(data.frame(array_gt))
+  colnames(gt) <- rownames(can_array)
+  rownames(gt) <- colnames(can_array)[i]
+  return(gt)
+}))
+```
+
+
+
+
+```{r array_passport}
+# get information (codes) of the array genotypes
+can_array_passport <- read.delim("./genotyping/snp_panels/array-genotypes_passport.tsv")
+can_array_passport %<>% 
+  rowwise() %>% 
+  filter(Génotype %in% colnames(array_gt) || code %in% colnames(array_gt)) %>% 
+  distinct(Génotype, .keep_all = T) %>% 
+  dplyr::select(-Species) %>% 
+  dplyr::rename(id = Génotype, group = `Genetic.Group`, Collection = Origin)
+can_array_passport <- left_join(data.frame(array_id = colnames(array_gt), source = "reference"),
+      can_array_passport,
+      by = c("array_id" = "id"), keep =T)
+can_array_passport %<>% 
+  mutate(code = ifelse(is.na(code), gsub(" |-", "_", array_id), code))
+# rename genotype id by code
+
+colnames(array_gt) <- sapply(colnames(array_gt), function(i) can_array_passport$code[can_array_passport$array_id == i], USE.NAMES = F)
+```
+
+36 common inds in kasp and snp array  
+    - 1 ind is duplicated in the kasp array. the replicates are identical after remove inconsistent genotypes
+    - 2 inds are duplicated in snp array (0-1 different genotype) -> remove the duplicates,  
+    - 17 inds represent in the sequencing data
+    ~> 33 unique inds
+
+```{r}
+# kasp_ind <- plate %>% 
+#   filter(Plate != "P05", `Sample name` %in% grep("S-", `Sample name`, value = T, invert = T)) %>% 
+#   pull(code)
+# snp array with common names
+com_ref <- merge(plate %>% filter(Plate != "P05"), can_array_passport, by = "code")
+com_ref %<>% 
+  rowwise() %>% 
+  mutate(kasp_id = grep(paste0(code, "_", Plate), colnames(sample_gt), value = T))
+# com_array <- can_array_passport %>% filter(id %in% kasp_ind | other_code %in% kasp_ind)
+# # kasp array with common names
+# com_kasp <- plate %>% filter(Plate != "P05") %>% filter(`Acc-name` %in% unique(c(com_array$id, com_array$other_code))) 
+
+## check number of mismatches within SNP array
+# for (i in colnames(array_gt)[duplicated(colnames(array_gt))]) {
+#   m <- array_gt[, grep(i, colnames(array_gt))]
+#   m[,1][m[,1] != m[,2]] %>% length %>% print
+# }
+array_gt <- array_gt[,!duplicated(colnames(array_gt))]
+
+```
+
+
+
+## Filter missing data and quality control
+
+
+### Check %error within kasp genotyping, remove inconsistent genotype then remove duplicates
+
+
+
+```{r}
+dup_ind <- colnames(geno)[duplicated(gsub("_P.+", "", colnames(geno)))]
+dup_ind <- unique(gsub("P.+", "", dup_ind))
+error <- data.frame(row.names = rownames(geno))
+for (i in dup_ind) {
+  geno_i <- geno[,grepl(i, colnames(geno))]
+  loci_dif <- apply(geno_i, 1, function(i) ifelse(length(unique(i)) > 1, 1, 0))
+  e <- data.frame(loci_dif)
+  colnames(e) <- i
+  error <- cbind(error, e)
+  # pc_dif <- length(loci_dif)/nrow(geno_i)
+  geno[loci_dif, colnames(geno_i)] <- "NA"
+  # geno[, colnames(geno_i)[-1]] <- NULL
+  # error <- c(error, pc_dif)
+}
+# error by individual
+cat("error by individual:\n")
+summary(colMeans(error))
+# error by snp
+cat("error by SNP:\n")
+summary(rowMeans(error))
+cat("SNPs > 15% error:", rownames(error)[rowMeans(error) > .15], sep = "\n")
+
+# remove inconsistant genotypes
+for (i in colnames(error)) {
+  ind <- grep(i, colnames(sample_gt))
+  new_gt <- mapply(function(g, e) ifelse(e == 1, NA, g), g = sample_gt[,ind[1]], e = error[,i])
+  # if (length(fsnp) > 0) sample_gt[,ind[1]] <- new_gt
+  sample_gt[, c(ind[-1])] <- NULL
+}
+sample_genind <- df2genind(t(sample_gt), sep = "/", ncode = 3, ploidy = 2, type = "codom")
+strata(sample_genind) <- sample_info %>% filter(id %in% colnames(sample_gt))
+```
+
+### Check missing data in the VN sample
+```{r}
+s_gt <- geno %>% dplyr::select(sample_info %>% filter(species == "canephora") %>% pull(id))
+
+missing <- apply(s_gt, c(1,2), function(g) ifelse(g == ".", 1L, 0L))
+# missing by ind
+cat("error by individual:\n")
+summary(colMeans(missing))
+# missing by snp
+cat("error by SNP:\n")
+summary(rowMeans(missing))
+```
+
+
+### Check mismatch with snp array (Merot)
+
+```{r}
+geno_kasp <- sample_gt[, sample_genind@strata$code %in% com_ref$code]
+geno_kasp[is.na(geno_kasp)] <- "."
+geno_kasp[geno_kasp == "NA"] <- "."
+colnames(geno_kasp) <- sapply(colnames(geno_kasp), function(i) sample_genind@strata$code[sample_genind@strata$id == i])
+
+geno_array <- array_gt[, colnames(array_gt) %in% com_ref$code]
+# colnames(geno_array) <- sapply(colnames(geno_array), function(i) {
+#   unique(com_kasp$`Sample name`[com_kasp$`Acc-name` %in% c(i, com_array$other_code[com_array$id == i])])
+# })
+
+error_arr <- sapply(unique(colnames(geno_kasp)), function (i) {
+  geno <- strsplit(geno_kasp[,i], "/")
+  gt <- lapply(geno, function(g) {
+    if (length(g) == 1) return(g)
+    gt12 <- paste(g[1], g[2], sep = "/")
+    gt21 <- paste(g[2], g[1], sep = "/")
+    return(c(gt12, gt21))
+  })
+  loci_dif <- mapply(function(x, y) ifelse(!any(x %in% y), 1, 0), x = geno_array[,i], y = gt, SIMPLIFY = T)
+  # pc_dif <- length(loci_dif)/nrow(ref_tr)
+  return(loci_dif)
+})
+# error by ind
+cat("error by individual:\n")
+summary(colMeans(error_arr))
+cat("individuals > 15% error:", com_ref$array_id[com_ref$code %in% colnames(error_arr)[colMeans(error_arr) > .15]])
+# error by snp
+cat("error by SNP:\n")
+summary(rowMeans(error_arr))
+cat("SNPs > 15% error:")
+rownames(error_arr)[rowMeans(error_arr) > .15]
+
+# remove inconsistent genotypes and keep the individuals from snp arrays
+```
+
+### Check error with sequencing data
+
+```{r check error with seq data}
+# TR genotypes in the array
+tr_id <- grep("TR", sample_genind@strata$identification, value = T)
+geno_tr <- sample_gt[, sample_genind@strata$identification %in% tr_id]
+colnames(geno_tr) <- sapply(colnames(geno_tr), function(i) sample_genind@strata$identification[sample_genind@strata$id == i])
+
+# reference genotypes in the kasp genotyping 
+ref_cm <- unique(com_ref$code[com_ref$code %in% gsub("_\\D{1,2}$", "", ref_info$code)])
+ref_geno <- sample_gt[, gsub("_P.+", "", colnames(sample_gt)) %in% ref_cm]
+colnames(ref_geno) <- gsub("_P.+", "", colnames(ref_geno))
+cm_geno <- cbind(geno_tr, ref_geno)
+cm_geno[is.na(cm_geno)] <- "."
+cm_geno[cm_geno == "NA"] <- "."
+
+ref_gt <- extract.gt(ref_vcfR, return.alleles = T)
+rownames(ref_gt) <- gsub("\\.", "_", rownames(ref_gt))
+tr_seq_id <- grep("TR\\d+", colnames(ref_gt), value = T)
+ref_seq_id <- gsub("_\\D{1,2}$", "", ref_info$Label[sapply(ref_cm, function(i) grep(i, ref_info$code))])
+cm_seq <- ref_gt[rownames(sample_gt), c(tr_seq_id, ref_seq_id)]
+colnames(cm_seq) <- c(gsub("m", "", tr_seq_id), ref_cm)
+
+
+error_tr <- sapply(colnames(cm_seq), function (i) {
+  geno <- strsplit(cm_geno[,i], "/")
+  gt <- lapply(geno, function(g) {
+    if (length(g) == 1) return(g)
+    gt12 <- paste(g[1], g[2], sep = "/")
+    gt21 <- paste(g[2], g[1], sep = "/")
+    return(c(gt12, gt21))
+  })
+  loci_dif <- mapply(function(x, y) ifelse(!any(x %in% y), 1, 0), x = cm_seq[,i], y = gt, SIMPLIFY = T)
+  # pc_dif <- length(loci_dif)/nrow(ref_tr)
+  return(loci_dif)
+})
+# error by ind
+cat("error by individual:\n")
+summary(colMeans(error_tr))
+cat("individuals > 15% error:", colnames(error_tr)[colMeans(error_tr) > .15])
+# error by snp
+cat("error by SNP:\n")
+summary(rowMeans(error_tr))
+cat("SNPs > 15% error:", rownames(error_tr)[rowMeans(error_tr) > .15], sep = "\n")
+```
+
+
+### Filter unqualified SNPs
+```{r}
+tr_genind <- seq_ref_genind[grep("TR", indNames(seq_ref_genind), value = T)]
+tr_info <- sample_genind@strata %>% filter(identification %in% gsub("m", "", indNames(tr_genind)))
+strata(tr_genind) <- left_join(data.frame(identification = gsub("m", "", indNames(tr_genind)),
+                                          group = "TR"),
+                     tr_info, by = "identification")
+tr_genind@strata %<>% mutate(kasp_id = code)
+tr_genind@strata$code <- indNames(tr_genind)
+
+ref_info_file <- "./test_10_clones/sequence_info_final.tsv"
+ref_info <- read.delim(ref_info_file, header = T, stringsAsFactors = F)
+ref_info %<>% mutate(code = paste(code, group, sep = "_"))
+indNames(seq_ref_genind) <- sapply(indNames(seq_ref_genind), function(n) ref_info$code[grepl(n, ref_info$Label)])
+strata(seq_ref_genind) <- data.frame(ref_info, source = "reference")
+ref_genind <- seq_ref_genind[grep("TR", indNames(seq_ref_genind), value = T, invert = T)]
+
+# sample (genotyping)
+# sample_genind <- df2genind(t(sample_gt), sep = "/", ncode = 3, ploidy = 2, type = "codom")
+# strata(sample_genind) <- sample_info %>% distinct(code, .keep_all = T)
+# remove liberica and arabica from sample genotypes
+# kasp inds to include (VN canephora except for the TRs, common reference inds with snp array)
+
+kasp_inds <- sample_genind@strata %>% 
+  filter(species == "canephora" |
+         id %in% com_ref$kasp_id) %>% 
+  filter(identification %in% grep("TR\\d+", identification, value = T, invert = T)) %>% 
+  # mutate(id = ifelse(grepl("S-", code), as.character(id), gsub("_P.+", "_kasp", id))) %>% 
+  pull(id)
+can_genind <- sample_genind[kasp_inds]
+can_genind@strata %<>% 
+  mutate(source = ifelse(grepl("S-", as.character(code)), as.character(source), "reference")) %>% 
+  mutate(code = ifelse(grepl("S-", code), as.character(code), paste0(code, "_kasp")))
+indNames(can_genind) <- can_genind@strata$code
+
+# array
+array_genind <- df2genind(t(array_gt), sep = "/", ncode = 3, ploidy = 2, type = "codom") 
+array_genind@strata <- can_array_passport %>% 
+  distinct(code, .keep_all = T) %>% 
+  mutate(id = code) %>% 
+  relocate(id)
+# array_genind <- array_genind[unique(com_ref$code)]
+array_genind@strata %<>% mutate(code = paste(code, "array", group, sep = "_"))
+indNames(array_genind) <- array_genind@strata$code
+
+all_genind <- repool(ref_genind, array_genind, tr_genind, can_genind)
+all_genind@strata <- all_genind@strata[sapply(indNames(all_genind), 
+                                              function(i) which(all_genind@strata$code == i), 
+                                              USE.NAMES = F),] %>% 
+  relocate(code)
+
+# remove snps failed in >15% within genotyping data and snps failed in > 3 inds in comparison with sequencing
+failed_snps <- unique(c(rownames(error)[rowMeans(error) > .15], 
+                        rownames(error_tr)[rowMeans(error_tr) > .15]))
+                        # rownames(error_arr)[rowMeans(error_arr) > .15])) # 16 failed snps
+cat("failed SNPs:", failed_snps, sep = "\n")
+removed_inds <- colnames(error_arr)[colMeans(error_arr) > .15]
+removed_inds <- grep(removed_inds, indNames(all_genind), value = T)
+cat("failed ind:", removed_inds, sep = "\n")
+# all_genind <- all_genind[indNames(all_genind)[!indNames(all_genind) %in% removed_inds], loc = locNames(all_genind)[!locNames(all_genind) %in% failed_snps]]
+all_genind <- all_genind[loc = locNames(all_genind)[!locNames(all_genind) %in% failed_snps]]
+
+cat("Data after filtering")
+all_genind
+```
+
+
+
+```{r}
+
+list_ind <- list(
+  sequencing = gsub("_\\D+", "", seq_ref_genind@strata$code),
+  kasp = gsub("_\\D+|m$", "", c(can_genind@strata$code, tr_genind@strata$code)),
+  array = gsub("_\\D+", "", array_genind@strata$code)
+)
+
+ggvenn(
+  list_ind, 
+  fill_color = viridis(3),
+  stroke_size = 0.5, text_size = 6,
+  show_percentage = F
+  )
+
+```
+
+
+
+### Discrimination capacity of the genotyped SNPs, compared with 1.1 M genome-wide SNPs
+
+```{r, results='hide'}
+snmf_dir <- tempfile()
+dir.create(snmf_dir, showWarnings = F)
+snmf_geno_file <- file.path(snmf_dir, "all_gt.geno")
+write.geno(genind2geno(seq_ref_genind), snmf_geno_file)
+ref_snmf <- snmf(snmf_geno_file, K = 1:15, repetitions = 10, CPU = 2, entropy = T, seed = 987654321, project = "new")
+# plot(ref_snmf)
+```
+
+```{r}
+k <- 5
+prop_5 <- Q(ref_snmf, K = k, run = which.min(cross.entropy(ref_snmf, K = k))) %>% as.data.frame()
+prop_5$id <- seq_ref_genind@strata$Label
+prop_5 <- reshape2::melt(prop_5, variable.name = "ancestry", value.name = "proportion")
+levels(prop_5$ancestry) <- c("ER", "OB", "AG", "D", "C")
+l <- paste(nLoc(all_genind), "SNPs")
+prop_5$snp <- l
+```
+
+```{r}
+seq_all_prop <- readRDS("./test_10_clones/snmf_random_10perc_SNPs/allsnmf_proportion.Rds")
+seq_all_prop$snp <- "1.1M SNPs"
+```
+
+```{r, fig.height=12, fig.width=15}
+cmp_prop <- rbind(seq_all_prop[,c("id", "ancestry", "proportion", "snp")], prop_5)
+cmp_prop$ancestry <- factor(cmp_prop$ancestry, levels = c("ER", "OB", "C", "D", "AG"))
+ggplot(cmp_prop) +
+  facet_wrap(vars(snp), ncol = 1) +
+  geom_col(aes(x = id, y = proportion, fill = ancestry), width = .9, position = position_stack()) + 
+  scale_fill_manual(values = viridis(5, end = .9)) +
+  theme(axis.text.x = element_text(angle = 90, h = 1, v = .5),
+        panel.background = element_rect(fill = "white"), 
+        panel.grid = element_line(color = "gray", size = .1)) +
+  xlab("individuals") +
+  ylab("ancestry proportion")
+```
+
+```{r}
+snmf_comp_cast <- dcast(cmp_prop, id+ancestry~snp, value.var = "proportion") 
+snmf_comp_cast %>% 
+  group_by(ancestry) %>% # for each ancestry
+  dplyr::summarise(across(matches(l), ~ rmse(`1.1M SNPs`, .))) %>% # calculate correlation between 2 datasets
+  rename_at(vars(matches(l)), ~ paste("RMSE")) %>% 
+  dplyr::select(RMSE) %>% colMeans() # get average over all ancestries
+snmf_comp_cast %>% 
+  group_by(ancestry) %>% 
+  dplyr::summarise(across(matches(l), ~ cor(`1.1M SNPs`, ., method = "pearson"))) %>% 
+  rename_at(vars(matches(l)), ~ paste("correlation")) %>% 
+  dplyr::select(correlation) %>% colMeans()
+```
+
+
+## Population structure analysis
+
+### snmf to clean the reference individuals
+
+```{r}
+all_ref_genind <- all_genind[all_genind@strata$code[all_genind@strata$source == "reference"]]
+```
+
+
+```{r snmf_all_ref, fig.height=6, fig.width=8, results='hide', eval=FALSE}
+all_ref_prop_list <- snmf_az(all_ref_genind, k_values = 5:8, CPUs = 2, snmf_rep = 100)
+all_ref_prop <- do.call(rbind, all_ref_prop_list)
+```
+
+```{r read_snmf_results, include=FALSE}
+# saveRDS(ref_snmf, "./genotyping/R_data/ref_snmf.RDS")
+# saveRDS(all_ref_prop, "./genotyping/R_data/all_ref_prop.RDS")
+# ref_snmf <- readRDS("./genotyping/R_data/ref_snmf.RDS")
+all_ref_prop <- readRDS("./genotyping/R_data/all_ref_prop.RDS")
+```
+
+
+```{r plot_snmf_all_ref, fig.height=6, fig.width=8, results='hide'}
+# all snmf results for k = 5 to 8
+ggplot(all_ref_prop) +
+  facet_wrap(vars(k), ncol = 1) +
+  geom_col(aes(x = code, y = proportion, fill = ancestry), width = 1, position = position_stack()) + 
+  scale_fill_viridis_d(option = "B") +
+  theme(axis.text.x = element_text(angle = 90, h = 1, v = .5),
+        panel.background = element_rect(fill = "white"), 
+        panel.grid = element_line(color = "gray", size = .1)) +
+  xlab("individuals") +
+  ylab("ancestry proportion")
+```
+
+
+
+
+```{r plot_snmf, fig.height=12, fig.width=20}
+# snmf results for replicates only k = 5:8
+all_ref_prop %>% 
+  filter(code %in% unlist(lapply(as.character(unique(com_ref$code)), function(i) grep(i, unique(all_ref_prop$code), value = T)))) %>% 
+  ggplot() + 
+  facet_grid(rows = vars(k), cols = vars(gsub("_.+", "", code)), scales = "free", space = "free") +
+  geom_col(aes(x = code, y = proportion, fill = ancestry), width = 1, position = position_stack()) + 
+  scale_fill_viridis_d(option = "B") +
+  theme(axis.text.x = element_text(angle = 90, h = 1, v = .5),
+        panel.background = element_rect(fill = "white"), 
+        panel.grid = element_line(color = "gray", size = .1)) +
+  xlab("individuals") +
+  ylab("ancestry proportion") 
+```
+
+
+Assign group for reference (k=8)
+
+```{r assign_group}
+# extract proportion for k=8 and rename ancestries
+prop <- all_ref_prop %>% filter(k == 8) %>% 
+  mutate(ancestry = case_when(ancestry == "V1" ~ "D",
+                              ancestry == "V2" ~ "C",
+                              ancestry == "V3" ~ "B",
+                              ancestry == "V4" ~ "R",
+                              ancestry == "V5" ~ "O",
+                              ancestry == "V6" ~ "A", 
+                              ancestry == "V7" ~ "G",
+                              ancestry == "V8" ~ "E"))
+# assign ancestral group to individuals with proportion > .8
+new_assign <- prop %>% group_by(code) %>% 
+  arrange(dplyr::desc(proportion)) %>% 
+  slice_head(n = 1) %>% 
+  mutate(group = ifelse(proportion > 0.7, ancestry, "hb")) %>% 
+  # mutate(code = paste(gsub("_\\w{1,2}$", "", as.character(code)), group, sep = "_")) %>%
+  select(code, group) 
+all_genind@strata %<>% 
+  rowwise() %>% 
+  mutate(group = ifelse(code %in% as.character(new_assign$code), new_assign$group[new_assign$code == as.character(code)], as.character(group)))
+# all_ref_genind <- all_genind[all_genind@strata$code[all_genind@strata$source == "reference"]]
+new_assign %>% group_by(group) %>% summarise(nb_inds = n())
+
+s <- prop %>% dplyr::select(code, Country, Collection, ancestry, proportion) %>% 
+  # dplyr::mutate(proportion = sprintf("%.2f", proportion)) %>%
+  reshape2::dcast(code + Country + Collection ~ ancestry, margins = "proportion") %>% 
+  dplyr::mutate(data = case_when(grepl("array", code) ~ "array",
+                                 grepl("kasp", code) ~ "kasp",
+                                 TRUE ~ "sequencing")) %>% 
+  dplyr::relocate("data", .after = "code")
+write.table(left_join(s, new_assign, by = "code"), "./genotyping/reference_assignment_snmf_K8.tsv", row.names = F, sep = "\t")
+```
+
+```{r tree_all_ref, fig.height=16, fig.width=10}
+ref_eu_dist <- dist(genind2geno(all_ref_genind,NA.code = NA), method = "euclidean")
+ref_njtree <- nj(ref_eu_dist)
+
+ggtree(ref_njtree, ladderize = T) %<+% (all_ref_genind@strata) +
+  geom_tiplab(aes(color = group),
+              hjust = 1,  align = T, linesize = .2, nudge_x = 6, size = 3) +
+  geom_tippoint(aes(color = group)) +
+  guides(color = guide_legend(title = "group"))
+
+# ref_hclust <- hclust(ref_eu_dist, method = "average")
+# # ref_upgma <- phangorn::upgma(ref_eu_dist, method = "ward.D")
+# ggtree(ref_hclust, ladderize = T) %<+% (all_ref_genind@strata %>% relocate(code)) +
+#   geom_tiplab(aes(color = group),
+#               hjust = 1,  align = T, linesize = .2, nudge_x = 6, size = 3) +
+#   geom_tippoint(aes(color = group)) +
+#   guides(color = guide_legend(title = "group"))
+```
+
+
+
+### Purify reference population  
+
+    - remove hybrids (<= 70%)
+    - keep common inds in seq/kasp data, remove common inds in snp array
+    - exception: 
+        - remove Epulu36_array_NA (71% O), its replicate in the seq data (Can36_B) is removed because of 67% O
+        - remove KL1_2_O (seq) because it has 30% OB (snmf on seq data)
+
+
+```{r}
+# common inds with kasp in array to be removed
+dup_array_id <- sapply(com_ref$code, 
+                       function(i) grep(paste0(i, "_array"), indNames(all_genind), value = T), 
+                       USE.NAMES = F)
+
+# common inds with seq data in the kasp to be removed
+dup_kasp_id <- na.omit(sapply(com_ref$code, function(i) {
+  ifelse(any(grepl(i, ref_genind@strata$code)), 
+         grep(paste0(i, "_kasp"), indNames(all_genind), value = T),
+         NA)
+}, USE.NAMES = F))
+# common inds with array data in the kasp to be removed
+dup_seq_id <- na.omit(sapply(can_array_passport$code, function(i) {
+  ifelse(any(grepl(i, ref_genind@strata$code)), 
+         grep(paste0(i, "_array"), indNames(all_genind), value = T),
+         NA)
+}, USE.NAMES = F))
+
+# remove common inds (50 common genotypes)
+all_genind <- all_genind[c(indNames(all_genind)[!indNames(all_genind) %in% unique(c(dup_array_id, dup_kasp_id, dup_seq_id, "KL1_2_O"))], "Can36_array_NA")]
+
+# remove hybrids (>= 70%)
+all_genind <- all_genind[all_genind@strata$code[c(which(all_genind$strata$group != "hb"), which(is.na(all_genind$strata$group)))]]
+
+ref_genind <- all_genind[all_genind@strata$source == "reference"]
+```
+
+### PCA
+
+PCA of reference only:
+```{r pca_ref, results=FALSE}
+# ref_genind <- ref_genind[loc = locNames(ref_genind)[!locNames(ref_genind) %in% failed_snps]]
+lfmm_file <- tempfile(fileext = ".lfmm")
+write.lfmm(genind2geno(ref_genind), lfmm_file)
+ref_pca <- pca(lfmm_file, scale = F)
+# remove.pcaProject(ref_pca@pcaProject.file)
+ref_pca_proj <- data.frame("code" = indNames(ref_genind),
+                           "code" = gsub("\\_.+", "", indNames(ref_genind)),
+                           "PC1" = ref_pca$projections[,1],
+                           "PC2" = ref_pca$projections[,2],
+                           "PC3" = ref_pca$projections[,3])
+ref_pca_proj <- left_join(ref_pca_proj, ref_genind@strata, by = "code")
+ref_pca_proj <- ref_pca_proj %>% mutate(group = as.character(group))
+```
+
+```{r pca_ref_plot}
+eigen <- ref_pca$eigenvalues[,1]
+ggplot(ref_pca_proj) +
+  # geom_point(aes(x = PC1, y = PC2, color = group), alpha = .5) +
+  geom_text(aes(x = PC1, y = PC2, label = group, color = group)) +
+  xlab(paste0("PC1 (", format(eigen[1]/sum(eigen)*100, digits = 2), "%)")) +
+  ylab(paste0("PC2 (", format(eigen[2]/sum(eigen)*100, digits = 2), "%)")) +
+  theme_minimal()
+
+
+ggplot(ref_pca_proj) +
+  geom_text(aes(x = PC1, y = PC3, label = group, color = group)) +
+  xlab(paste0("PC1 (", format(eigen[1]/sum(eigen)*100, digits = 2), "%)")) +
+  ylab(paste0("PC3 (", format(eigen[3]/sum(eigen)*100, digits = 2), "%)")) +
+  theme_minimal()
+```
+
+PCA for all reference and VN samples
+```{r pca_all, results=FALSE}
+# all_genind <- repool(ref_genind, can_genind)
+lfmm_file <- tempfile(fileext = ".lfmm")
+write.lfmm(genind2geno(all_genind), lfmm_file)
+all_pca <- pca(lfmm_file, scale = F)
+# remove.pcaProject(all_pca@pcaProject.file)
+all_pca_proj <- data.frame("code" = indNames(all_genind),
+                           "PC1" = all_pca$projections[,1],
+                           "PC2" = all_pca$projections[,2],
+                           "PC3" = all_pca$projections[,3])
+all_pca_proj <- left_join(all_pca_proj, all_genind@strata, by = "code")
+eigen <- all_pca$eigenvalues[,1]
+```
+
+
+```{r pca_all_plot1, results=FALSE}
+all_pca_proj <- all_pca_proj %>% 
+  mutate(group = ifelse(grepl("S-", id), "VN", as.character(group))) %>% 
+  mutate(group = ifelse(group == "NA", "VN", group)) %>%
+  mutate(label = ifelse(source == "reference", group, as.character(code))) %>% 
+  mutate(group = factor(group, levels = c("E", "R", "B", "O", "C", "A", "G", "D", "VN")))
+  # rowwise() %>% 
+  # mutate(purpose = paste(na.omit(colnames(all_pca_proj)[across() == "T"]), collapse = ", "))
+# all_pca_proj$purpose[all_pca_proj$purpose == ""] <- "diversity"
+# all_pca_proj <- all_pca_proj %>% filter(group != "other")
+ggplot(all_pca_proj[nrow(all_pca_proj):1,]) +
+  # geom_point(aes(x = PC1, y = PC2, color = group), alpha = .5) +
+  geom_text(aes(x = PC1, y = PC2, label = label, color = group)) +
+  xlab(paste0("PC1 (", format(eigen[1]/sum(eigen)*100, digits = 2), "%)")) +
+  ylab(paste0("PC2 (", format(eigen[2]/sum(eigen)*100, digits = 2), "%)")) +
+  scale_color_manual(values = c(turbo(8), "gray50")) + 
+  theme_minimal()
+
+
+ggplot(all_pca_proj[nrow(all_pca_proj):1,]) +
+  geom_text(aes(x = PC1, y = PC3, label = label, color = group)) +
+  xlab(paste0("PC1 (", format(eigen[1]/sum(eigen)*100, digits = 2), "%)")) +
+  ylab(paste0("PC3 (", format(eigen[3]/sum(eigen)*100, digits = 2), "%)")) +
+  scale_color_manual(values = c(hue_pal()(8), "gray30")) + 
+  theme_minimal()
+```
+
+
+
+```{r pca_all_plot2}
+all_pca_proj <- all_pca_proj %>% 
+  mutate(group = ifelse(grepl("TR", identification), "TR", group)) %>% 
+  mutate(label = ifelse(grepl("TR", identification), "TR", label))
+ggplot(all_pca_proj[nrow(all_pca_proj):1,]) +
+  # geom_point(aes(x = PC1, y = PC2, color = group), alpha = .5) +
+  geom_text(aes(x = PC1, y = PC2, label = label, color = group)) +
+  xlab(paste0("PC1 (", format(eigen[1]/sum(eigen)*100, digits = 2), "%)")) +
+  ylab(paste0("PC2 (", format(eigen[2]/sum(eigen)*100, digits = 2), "%)")) +
+  theme_minimal()
+
+
+ggplot(all_pca_proj[nrow(all_pca_proj):1,]) +
+  geom_text(aes(x = PC1, y = PC3, label = label, color = group)) +
+  xlab(paste0("PC1 (", format(eigen[1]/sum(eigen)*100, digits = 2), "%)")) +
+  ylab(paste0("PC3 (", format(eigen[3]/sum(eigen)*100, digits = 2), "%)")) +
+  theme_minimal()
+```
+
+PCA for all VN samples + reference, in categories of WASI evaluation
+```{r pca_all_plot_cate, fig.height=12, fig.width=12}
+ggplot(all_pca_proj[nrow(all_pca_proj):1,]) +
+  facet_wrap(vars(nematode_resistance, drought_tolerance, high_yield, high_quality), labeller = "label_both") +
+  geom_text(aes(x = PC1, y = PC2, label = label, color = group)) +
+  xlab(paste0("PC1 (", format(eigen[1]/sum(eigen)*100, digits = 2), "%)")) +
+  ylab(paste0("PC2 (", format(eigen[2]/sum(eigen)*100, digits = 2), "%)"))
+```
+
+
+
+
+```{r pca_all_plot_category, include=FALSE, eval=FALSE}
+ggplot(all_pca_proj[!is.na(all_pca_proj$duplication),]) +
+  geom_point(aes(x = PC1, y = PC2, color = duplication), alpha = .5) +
+  geom_text_repel(aes(x = PC1, y = PC2, label = duplication, color = duplication), alpha = .5) +
+  theme_minimal()
+
+ggplot(all_pca_proj) +
+  facet_wrap(vars(purpose)) +
+  # geom_point(aes(x = PC1, y = PC2, color = group)) +
+  geom_text(aes(x = PC1, y = PC2, label = label)) +
+  theme_minimal()
+# 
+ggplot(all_pca_proj) +
+  facet_wrap(vars(field)) +
+  # geom_point(aes(x = PC1, y = PC3, color = group)) +
+  geom_text(aes(x = PC1, y = PC2, label = label, color = purpose), alpha = .7) +
+  theme_minimal()
+```
+
+
+
+### NJ tree using euclidean distance
+
+
+Tree of references only
+```{r tree_ref, fig.height=12, fig.width=10}
+ref_eu_dist <- dist(genind2geno(ref_genind, NA.code = NA))
+ref_tree <- nj(ref_eu_dist)
+
+# ggtree(ref_tree, layout = "ape") %<+% (ref_genind@strata %>% relocate(code)) +
+#   geom_tiplab(aes(color = group),
+#   linesize = .2, size = 2) +
+#   geom_tippoint(aes(color = group)) +
+#   guides(color = guide_legend(title = "group"))
+
+ggtree(ref_tree, ladderize = T) %<+% (ref_genind@strata %>% relocate(code)) +
+  geom_tiplab(aes(color = group),
+              hjust = 1,  align = T, linesize = .2, nudge_x = 6, size = 3) +
+  geom_tippoint(aes(color = group)) +
+  guides(color = guide_legend(title = "group"))
+
+ggtree(ref_tree, layout = "ape") %<+% (ref_genind@strata %>% relocate(code)) +
+  geom_tiplab(aes(color = group),
+              hjust = 0, linesize = .2, size = 2) +
+  geom_tippoint(aes(color = group), size = 3) +
+  guides(color = guide_legend(title = "group")) 
+```
+
+Add 3 liberica accessions to root the tree
+```{r, root_tree_ref, fig.height=12, fig.width=10}
+out_genind <- sample_genind[na.omit(indNames(sample_genind)[sample_genind@strata$species == "liberica"])[1:3]]
+out_genind <- out_genind[loc = locNames(out_genind)[!locNames(out_genind) %in% failed_snps]]
+out_genind@strata <- out_genind@strata %>% 
+  mutate(code = gsub("S-", "liberica_", code)) %>% 
+  mutate(id = code)
+indNames(out_genind) <- out_genind@strata$code
+
+root_genind <- repool(ref_genind, out_genind)
+root_genind@strata %<>% 
+  rowwise() %>% 
+  mutate(data = case_when(grepl("array", code) ~ "array",
+                          grepl("kasp", code) ~ "kasp",
+                          grepl("liberica", code) ~ "kasp",
+                          TRUE ~ "sequencing"))
+         # group = ifelse(grepl("liberica", code), "liberica", as.character(group)))
+
+ref_eu_dist <- dist(genind2geno(root_genind, NA.code = NA))
+root_njtree <- nj(ref_eu_dist)
+root_njtree <- root.phylo(root_njtree, outgroup = indNames(out_genind))
+
+ggtree(root_njtree, ladderize = T) %<+% (root_genind@strata %>% relocate(code)) +
+  geom_tiplab(aes(color = group),
+              hjust = 1,  align = T, linesize = .2, nudge_x = 6, size = 3) +
+  geom_tippoint(aes(color = group, shape = data), size = 3) +
+  scale_shape_manual(values = c(16:18)) +
+  guides(color = guide_legend(title = "group"))
+```
+
+
+```{r, root_tree_ref_circle, fig.height=12, fig.width=12}
+ggtree(root_njtree, layout = "fan") %<+% (root_genind@strata %>% relocate(code)) +
+  geom_tiplab(aes(color = group),
+              hjust = 0,  align = T, linesize = .2, nudge_x = 2, size = 3) +
+  geom_tippoint(aes(color = group, shape = data), size = 3) +
+  scale_shape_manual(values = c(16:18)) +
+  guides(color = guide_legend(title = "group")) 
+```
+
+
+
+Tree of all VN samples + references
+```{r tree_all, fig.height=20, fig.width=10}
+# all_genind@strata$group <- all_genind@strata$SSR_Group
+all_genind@strata <- all_genind@strata %>% 
+  mutate(group = ifelse(grepl("S-", as.character(id)), NA, as.character(group)))
+  # mutate(group = ifelse(grepl("A|G", group), "AG", group)) %>% 
+  # mutate(group = ifelse(grepl("O|B", group), "OB", group)) %>% 
+  # mutate(group = ifelse(group %in% c("E", "R"), "ER", group)) %>% 
+  # mutate(group = ifelse(grepl("VN", group), "TR", group))
+
+all_eu_dist <- dist(genind2geno(all_genind, NA.code = NA))
+all_tree <- nj(all_eu_dist)
+# ggtree(all_tree, layout = "equal_angle") %<+% (ref_genind@strata %>% mutate(lb = ifelse(grepl("S-|TR", as.character(id)), as.character(id), as.character(group)))) +
+#   geom_tiplab(aes(color = group, label = lb),
+#               hjust = 0, linesize = .2, nudge_x = 0, size = 3) +
+#   geom_tippoint(aes(color = group)) +
+#   guides(color = guide_legend(title = "group"))
+
+# png("genotyping/nj_all_VN_can_new.png", width = 1500, height = 3000, res = 200)
+```
+
+
+```{r tree_all_dendro, fig.height=20, fig.width=10}
+ggtree(all_tree, ladderize = T) %<+% (all_genind@strata %>% relocate(code)) + # %>% mutate(lb = ifelse(grepl("S-|TR", as.character(id)), as.character(id), as.character(group)))) +
+  geom_tiplab(aes(color = group),
+              hjust = 1,  align = T, linesize = .2, nudge_x = 10, size = 2) +
+  geom_tippoint(aes(color = group)) +
+  guides(color = guide_legend(title = "group"))
+# dev.off()
+```
+
+
+```{r tree_all_ape, fig.height=12, fig.width=12}
+ggtree(all_tree, layout = "ape") %<+% (all_genind@strata %>% relocate(code)) +
+  geom_tiplab(aes(subset = grepl("S-", label), color = group), hjust = -0.5,
+              linesize = .2, size = 5) +
+  geom_tippoint(aes(color = group), shape = 18, size = 5) +
+  guides(color = guide_legend(title = "group"))
+```
+
+
+```{r tree_all_circle, fig.height=10, fig.width=10}
+ggtree(all_tree, layout = "fan") %<+% (all_genind@strata %>% relocate(code)) +
+  geom_tiplab(aes(subset = grepl("S-", label), group = group), hjust = -0.5,
+              linesize = .2, size = 4) +
+  geom_tippoint(aes(color = group), shape = 18, size = 4.5) +
+  guides(color = guide_legend(title = "group"))
+```
+
+```{r, eval=FALSE}
+png("genotyping/nj_all_VN_can_new.png", width = 1500, height = 3000, res = 200)
+ggtree(all_tree, ladderize = T) %<+% (all_genind@strata %>% mutate(lb = ifelse(grepl("S-|TR", as.character(code)), as.character(code), as.character(group)))) +
+  geom_tiplab(aes(color = group, label = lb),
+              hjust = 1,  align = T, linesize = .2, nudge_x = 10, size = 2) +
+  geom_tippoint(aes(color = group)) +
+  guides(color = guide_legend(title = "group"))
+dev.off()
+```
+
+
+Tree of VN samples including liberica accessions, to check the individual looking alike liberica (S-15)
+```{r check liberica, fig.height=12, fig.width=8}
+# vietnamese individuals (canephora supposedly)
+vn_genind <- all_genind[all_genind@strata$code[all_genind@strata$source == "sample"]]
+# liberica inds
+out_genind <- sample_genind[na.omit(indNames(sample_genind)[sample_genind@strata$species == "liberica"])]
+out_genind <- out_genind[loc = locNames(out_genind)[!locNames(out_genind) %in% failed_snps]]
+indNames(out_genind) <- out_genind@strata$code
+
+canlib_genind <- repool(vn_genind, out_genind)
+
+canlib_dist <- dist(genind2geno(canlib_genind, NA.code = NA))
+canlib_tree <- nj(canlib_dist)
+
+size_S15 <- sapply(indNames(canlib_genind), function(x) ifelse(x == "S-15", 5, 2))
+ggtree(canlib_tree, ladderize = T) %<+% (canlib_genind@strata %>% relocate(code) %>% mutate(test = ifelse(code == "S-15", "test", "not_test"))) + 
+  geom_tiplab(aes(color = species), size = size_S15, 
+              hjust = 1,  align = T, linesize = .2, nudge_x = 10) +
+  geom_tippoint(aes(color = species)) 
+```
+
+
+```{r, include=FALSE, eval=FALSE}
+p1 + geom_text(aes(label=node), hjust=0)
+
+viewClade(p1, node=491)
+viewClade(p1, node=501)
+viewClade(p1, node=497)
+viewClade(p1, node=454)
+viewClade(p1, node=432)
+viewClade(p1, node=434)
+# viewClade(p1, node=492)
+viewClade(p1, node=395)
+viewClade(p1, node=402)
+viewClade(p1, node=399)
+
+```
+
+
+
+```{r, include=FALSE, eval=FALSE}
+test_genind <- repool(ref_genind, kasp_genind[grep("S-", indNames(kasp_genind), value = T)])
+# test_genind@strata$group <- test_genind@strata$SSR_Group
+test_genind@strata <- test_genind@strata %>% 
+  mutate(group = ifelse(grepl("S-", as.character(id)), "S", as.character(group))) %>% 
+  mutate(group = ifelse(grepl("A|G", group), "AG", group)) %>% 
+  mutate(group = ifelse(grepl("O|B", group), "OB", group)) %>% 
+  mutate(group = ifelse(group %in% c("E", "R"), "ER", group)) %>% 
+  mutate(group = ifelse(grepl("VN", group), "TR", group))
+
+eu_dist <- dist(genind2geno(test_genind, NA.code = NA))
+nj_tree <- nj(eu_dist)
+ggtree(nj_tree, ladderize = T) %<+% test_genind@strata +
+  geom_tiplab(aes(color = group),
+              hjust = 1,  align = T, linesize = .2, nudge_x = 10, size = 4) +
+  geom_tippoint(aes(color = group)) +
+  guides(color = guide_legend(title = "group"))
+
+ggtree(nj_tree, layout = "equal_angle") %<+% test_genind@strata +
+  geom_tiplab(aes(color = group),
+              hjust = 0, linesize = .2, nudge_x = 0, size = 4) +
+  geom_tippoint(aes(color = group)) +
+  guides(color = guide_legend(title = "group"))
+```
+
+### SNMF to detect hybrids
+
+SNMF of only pure reference
+```{r pure_ref_snmf, fig.height=12, fig.width=20, results='hide', eval=FALSE}
+ref_prop <- snmf_az(ref_genind, k_values = 1:10, CPUs = 2, k_plot = 5:8)
+```
+
+
+SNMF of pure reference + VN samples
+```{r pure_ref_vn_snmf, fig.height=12, fig.width=20, results='hide', eval=FALSE}
+all_prop <- snmf_az(all_genind, k_values = 5:8, CPUs = 2, k_plot = 5:8)
+```
+
+```{r read_vn_snmf_results, include=FALSE}
+# saveRDS(ref_prop, "./genotyping/R_data/ref_prop.RDS")
+# saveRDS(all_prop, "./genotyping/R_data/all_prop.RDS")
+ref_prop <- readRDS("./genotyping/R_data/ref_prop.RDS")
+all_prop <- readRDS("./genotyping/R_data/all_prop.RDS")
+```
+
+```{r plot_pure_ref_snmf, fig.height=5, fig.width=12, results='hide'}
+ref_prop_k <- ref_prop[[2]]
+ref_prop_k %<>% 
+  rowwise(code) %>% 
+  mutate(recode = ifelse(grepl("S-|TR", code), as.character(code), paste0("R", "-", which(levels(ref_prop_k$code) == code), "_", group)))
+ref_prop_k$recode <- factor(ref_prop_k$recode, levels = sapply(levels(ref_prop_k$code), function(x) unique(ref_prop_k$recode[ref_prop_k$code == x])))
+ggplot(ref_prop_k) +
+    geom_col(aes(x = recode, y = proportion, fill = ancestry), width = 1, position = position_stack()) + 
+    scale_fill_manual(values = viridis(8, option = "B")) +
+    theme(axis.text.x = element_text(angle = 90, h = 1, v = .5, size = 6),
+          panel.background = element_rect(fill = "white"), 
+          panel.grid = element_line(color = "gray", size = .1)) +
+    xlab("individuals") +
+    ylab("ancestry proportion")
+
+```
+
+choose K = 6 (SNMF of pure reference + VN samples)
+```{r pure_ref_vn_snmf_k6, fig.height=8, fig.width=20, results='hide'}
+all_prop_k <- all_prop[[2]]
+all_prop_k %<>% 
+  rowwise(code) %>%
+  mutate(recode = ifelse(code %in% as.character(ref_prop_k$code), unique(as.character(ref_prop_k$recode[ref_prop_k$code == as.character(code)])), as.character(code)))
+
+all_prop_k$recode <- factor(all_prop_k$recode, levels = sapply(levels(all_prop_k$code), function(x) unique(all_prop_k$recode[all_prop_k$code == x])))
+# all_prop_k$code <- factor(all_prop_k$code, levels = unique(all_prop_k$code))
+col_axis <- c("black", "darkred")[sapply(levels(all_prop_k$code), function(i) unique(all_prop_k$source[all_prop_k$code == i]))]
+ggplot(all_prop_k) +
+    geom_col(aes(x = recode, y = proportion, fill = ancestry), width = 1, position = position_stack()) + 
+    scale_fill_manual(values = viridis(8, option = "B")) +
+    theme(axis.text.x = element_text(angle = 90, h = 1, v = .5, color = col_axis, size = 6),
+          axis.ticks.x = element_line(color = col_axis),
+          panel.background = element_rect(fill = "white"), 
+          panel.grid = element_line(color = "gray", size = .1)) +
+    xlab("individuals") +
+    ylab("ancestry proportion")
+```
+
+
+```{r}
+all_prop_k %>% 
+  mutate(origin = ifelse(grepl("(S-|TR)", recode), "Vietnam", "Reference")) %>% 
+  mutate(ancestry = case_when(ancestry == "V1" ~ "G",
+                              ancestry == "V2" ~ "ER",
+                              ancestry == "V3" ~ "A",
+                              ancestry == "V4" ~ "BO",
+                              ancestry == "V5" ~ "C",
+                              ancestry == "V6" ~ "D")) %>% 
+  mutate(ancestry = factor(ancestry, levels = c("ER", "BO", "C", "A", "G", "D"))) %>% 
+  ggplot() +
+    facet_grid(cols = vars(origin), shrink = T, scales = "free", space = "fixed") +
+    geom_col(aes(x = recode, y = proportion, fill = ancestry), width = 1, position = position_stack()) + 
+    scale_fill_manual(values = turbo(8)[c(1, 3, 5:8)]) +
+    theme(axis.text.x = element_text(angle = 90, h = 1, v = .5, size = 6),
+          # axis.ticks.x = element_line(color = col_axis),
+          panel.background = element_rect(fill = "white"), 
+          panel.grid = element_line(color = "gray", size = .1),
+          strip.text = element_text(size = 20)) +
+    xlab("individuals") +
+    ylab("ancestry proportion")
+```
+
+
+```{r assignment_k6}
+levels(all_prop_k$ancestry) <- c("G", "ER", "A", "OB", "C", "D")
+all_prop_k <- all_prop_k %>% 
+  filter(source == "sample") %>% 
+  dplyr::select(code, identification, ancestry, proportion, position, nematode_resistance, drought_tolerance)
+all_prop_k <- all_prop_k %>% group_by(code) %>% 
+  mutate(assignment = paste(ancestry[proportion > 0.08], collapse = ""))
+all_prop_k <- reshape2::dcast(all_prop_k, 
+                             code + identification + position + nematode_resistance + drought_tolerance + assignment ~ ancestry, 
+                             value.var = "proportion")
+```
+
+<!-- ### relationship between inds -->
+
+```{r, include=FALSE, eval=FALSE}
+fam_id <- sapply(vn_genind@strata$identification, function(i) ifelse(grepl("Apo\\d+", i), 2, 1))
+fam_id <- vn_genind@strata %>% 
+  rowwise() %>% 
+  mutate(fam = case_when(grepl("Apo\\d+", identification) ~ 2,
+                         # grepl("F1", origin..caracteristics) ~ 3,
+                         # identification %in% c("TR11", "TR12", "TR9") ~ 3,
+                         TRUE ~ 1)) %>% 
+  pull(fam)
+bim_loc <- as.data.frame(getFIX(ref_vcfR))
+bim_loc <- bim_loc %>% mutate(ID = paste(CHROM, POS, sep = "_")) %>% 
+  dplyr::select(CHROM, ID, POS, REF, ALT) %>% 
+  rename(chr = "CHROM", id = "ID", pos = "POS", ref = "REF", alt = "ALT") %>% 
+  filter(id %in% locNames(vn_genind)) %>% 
+  mutate(posg = 0) %>% 
+  relocate(posg, pos, .before = ref) %>% 
+  mutate(chr = as.numeric(as.factor(chr)))
+fam <- data.frame(
+  # fam = fam_id,
+  # fam = sample(c(1,2), nInd(vn_genind), replace = T),
+  fam = 1:nInd(vn_genind),
+  id = indNames(vn_genind),
+  pat = 0,
+  mat = 0,
+  sex = 0, 
+  pheno = 0)
+write_plink("genotyping/kinship/vn_geno", 
+            t(genind2geno(vn_genind, NA.code = NA)), 
+            bim = bim_loc,
+            fam = fam)
+```
+
+```{bash, include=FALSE, eval=FALSE}
+king/king -b vn_geno.bed --ibdseg --degree 3 --rplot
+king/king -b vn_geno.bed --related --rplot --degree 3
+king/king -b vn_geno.bed --kinship --degree 3 -rplot
+```
+
+```{r, include=FALSE, eval=FALSE}
+kinship <- read.table("genotyping/kinship/king.kin", sep = "\t", header = T)
+max(kinship$Kinship)
+kinship %>% filter(Error < 0.5) %>% pull(Kinship) %>% max()
+kinship %>% filter(FID == 3)
+
+kinship %>% 
+  as.data.frame() %>% 
+  # dplyr::select(ID1, ID2, Kinship) %>% 
+  # reshape2::dcast(ID1~ID2, value.var = "Kinship") %>% 
+  ggplot() +
+  geom_tile(aes(x = ID1, y = ID2, fill = Kinship)) +
+  scale_fill_viridis_c(option = "G", direction = -1)
+
+```
+
+
+# Core selection
+
+<!-- ## Selection favors low redundancy and representatives based on genetic distance (euclidean). -->
+
+
+
+```{r collection_data}
+vn_genind <- all_genind[all_genind@strata$code[all_genind@strata$source == "sample"]]
+pop(vn_genind) <- rep("NA", nInd(vn_genind))
+vn_phen <- vn_genind@strata %>% 
+  dplyr::select(code, nematode_resistance, drought_tolerance, high_yield, high_quality) %>% 
+  # rowwise() %>% 
+  # mutate(nematode_resistance = case_when(nematode_resistance == "S" ~ 0,
+  #                                        is.na(nematode_resistance) ~ 1,
+  #                                        nematode_resistance == "potential" ~ 2,
+  #                                        nematode_resistance == "R" ~ 3),
+  #        drought_tolerance = case_when(drought_tolerance == "S" ~ 0,
+  #                                      is.na(drought_tolerance) ~ 1,
+  #                                      drought_tolerance == "potential" ~ 2,
+  #                                      drought_tolerance == "R" ~ 3),
+  #        high_yield = case_when(high_yield == "N" ~ 0,
+  #                               is.na(high_yield) ~ 1,
+  #                               high_yield == "potential" ~ 2,
+  #                               high_yield == "Y" ~ 3),
+  #        high_quality = case_when(high_quality == "N" ~ 0,
+  #                                 is.na(high_quality) ~ 1,
+  #                                 high_quality == "potential" ~ 2,
+  #                                 high_quality == "Y" ~ 3)) %>%
+  column_to_rownames("code")
+phen_data <- phenotypes(vn_phen, types = rep("NS", ncol(vn_phen)))
+vn_gmat <- genind2geno(vn_genind, NA.code = NA)
+geno_data <- genotypes(vn_gmat, format = "biparental")
+collection_data <- coreHunterData(genotypes = geno_data, 
+                                  # phenotypes = phen_data,
+                                  distances = distances(as.matrix(dist(genind2geno(vn_genind, NA.code = NA), upper = T))))
+```
+
+
+
+```{r core_collection, fig.height=12, fig.width=12, include=FALSE, eval=FALSE}
+# for (i in c("AN", "EN", "SH")) {
+#   set.seed(567)
+#   core <- sampleCore(collection_data, size = 35/128, 
+#                      obj = list(
+#                        objective(type = i, measure = "PD")
+#                        # objective(type = "EE", measure = "PD", weight = 1)
+#                        # objective(type = "EN", measure = "GD", weight = 1)
+#                        # objective(type = "AN", measure = "GD", weight = 1)
+#                        ),
+#                      steps = 1000, impr.steps = 10)
+#   
+#   core_plot <- ggplot(all_pca_proj %>% rowwise() %>% mutate(group = ifelse(code %in% core$sel, "selected", as.character(group)))) +
+#     # geom_point(aes(x = PC1, y = PC2, color = group), alpha = .5) +
+#     geom_text(aes(x = PC1, y = PC2, label = label, color = group)) +
+#     xlab(paste0("PC1 (", format(eigen[1]/sum(eigen)*100, digits = 2), "%)")) +
+#     ylab(paste0("PC2 (", format(eigen[2]/sum(eigen)*100, digits = 2), "%)")) +
+#     facet_wrap(vars(nematode_resistance, drought_tolerance, high_yield, high_quality), labeller = "label_both") +
+#     ggtitle(paste0("Selection based on ", i))
+#   print(core_plot)
+#   print(core)
+#   print(datatable(accession %>% filter(code %in% core$sel)))
+# }
+
+set.seed(567)
+core <- sampleCore(collection_data, size = 35/128, 
+                   obj = list(
+                     objective(type = "AN", measure = "PD", weight = 1),
+                     objective(type = "EN", measure = "PD", weight = 1),
+                     objective(type = "SH"),
+                     # objective(type = "EE", measure = "PD", weight = 1)
+                     # objective(type = "EN", measure = "GD", weight = 1)
+                     objective(type = "EN", measure = "GD", weight = .5)
+                     ),
+                   steps = 1000, impr.steps = 10)
+
+ggplot(all_pca_proj %>% rowwise() %>% mutate(group = ifelse(code %in% core$sel, "selected", as.character(group)))) +
+  # geom_point(aes(x = PC1, y = PC2, color = group), alpha = .5) +
+  geom_text(aes(x = PC1, y = PC2, label = label, color = group)) +
+  xlab(paste0("PC1 (", format(eigen[1]/sum(eigen)*100, digits = 2), "%)")) +
+  ylab(paste0("PC2 (", format(eigen[2]/sum(eigen)*100, digits = 2), "%)")) +
+  facet_wrap(vars(nematode_resistance, drought_tolerance, high_yield, high_quality), labeller = "label_both")
+
+print(core)
+
+datatable(accession %>% filter(code %in% core$sel))
+```
+
+
+## Keep plants that are nematode R/S and potential drought S, and select the rest based on genetic distance  
+
+    - euclidean distance  
+    - 3 objectives: equal weight  
+      - AN (representative) - weight = 0.5
+      - SH (diversity) - weight = 1  
+      - EN (redundancy) - weight = 1 
+    - always keep 4 plants  
+    - never select 10 TRs
+    
+```{r core_collection_1, fig.height=10, fig.width=10, eval=FALSE}
+set.seed(567)
+core <- sampleCore(collection_data, size = 35/138, 
+                   obj = list(
+                     objective(type = "AN", measure = "PD", weight = 1), # representative
+                     objective(type = "EN", measure = "PD", weight = 1), # redundancy
+                     objective(type = "SH") # allelic diversity
+                     # objective(type = "EN", measure = "GD", weight = 1)
+                     # objective(type = "AN", measure = "GD", weight = 1) # 
+                     ),
+                   always.selected = c(
+                     vn_genind@strata %>% filter(nematode_resistance %in% c("S", "R")) %>% pull(code) %>% as.character, "S-76"),
+                     # "S-71", "S-76", "S-39", "S-95", "S-97"),
+                     # vn_genind@strata %>% filter(drought_tolerance %in% c("S", "R")) %>% pull(code) %>% as.character),
+                     never.selected = grep("TR", indNames(vn_genind), value = T),
+                   steps = 1000, impr.steps = 10)
+
+
+c1 <- ggplot(all_pca_proj %>% rowwise() %>% filter(code %in% core$sel | source == "sample") %>% mutate(core = ifelse(code %in% core$sel, "yes", "no")) %>% arrange(core)) +
+  # geom_point(aes(x = PC1, y = PC2, color = group), alpha = .5) +
+  geom_text(aes(x = PC1, y = PC2, label = label, color = core)) +
+  xlab(paste0("PC1 (", format(eigen[1]/sum(eigen)*100, digits = 2), "%)")) +
+  ylab(paste0("PC2 (", format(eigen[2]/sum(eigen)*100, digits = 2), "%)")) +
+  scale_color_manual(values = c("gray50", "brown"))
+c1
+```
+
+
+```{r core_collection_1_1, fig.height=12, fig.width=12, eval=FALSE, include=FALSE}
+ggplot(all_pca_proj %>% rowwise() %>% mutate(group = ifelse(code %in% core$sel, "selected", as.character(group)))) +
+  # geom_point(aes(x = PC1, y = PC2, color = group), alpha = .5) +
+  geom_text(aes(x = PC1, y = PC2, label = label, color = group)) +
+  xlab(paste0("PC1 (", format(eigen[1]/sum(eigen)*100, digits = 2), "%)")) +
+  ylab(paste0("PC2 (", format(eigen[2]/sum(eigen)*100, digits = 2), "%)")) 
+  # facet_wrap(vars(nematode_resistance, drought_tolerance, high_yield, high_quality), labeller = "label_both")
+
+ggplot(all_pca_proj %>% rowwise() %>% mutate(group = ifelse(code %in% core$sel, "selected", as.character(group)))) +
+  # geom_point(aes(x = PC1, y = PC2, color = group), alpha = .5) +
+  geom_text(aes(x = PC1, y = PC2, label = label, color = group)) +
+  xlab(paste0("PC1 (", format(eigen[1]/sum(eigen)*100, digits = 2), "%)")) +
+  ylab(paste0("PC2 (", format(eigen[2]/sum(eigen)*100, digits = 2), "%)")) +
+  facet_wrap(vars(nematode_resistance, drought_tolerance, high_yield, high_quality), labeller = "label_both")
+
+
+
+# print(core)
+
+datatable(accession %>% filter(code %in% core$sel))
+accession %>% filter(ode %in% core$sel) %>% write.table("./genotyping/core_selection/corehunter_selection_35_acc.tsv")
+```
+
+
+
+```{r core_tree, fig.height=20, fig.width=10, eval=FALSE, echo=FALSE}
+ggtree(all_tree, ladderize = T) %<+% (all_genind@strata %>% relocate(code) %>% mutate(lb = ifelse(code %in% core$sel, as.character(code), NA))) + # %>% mutate(lb = ifelse(grepl("S-|TR", as.character(id)), as.character(id), as.character(group)))) +
+  geom_tiplab(aes(color = group, label = lb),
+              hjust = 0, linesize = .2, size = 2) +
+  geom_tippoint(aes(color = group)) +
+  guides(color = guide_legend(title = "group"))
+```
+
+<!-- ## Evaluate the hunter core with 1000 random cores using CH criteria and allelic richness -->
+```{r evaluate_core_functions}
+# evaluate all the objectives of the core
+evaluateCore_full <- function(core, collection_ch, collection_genind) {
+  eval <- sapply(c("AN", "EN", "EE", "SH", "HE", "CV"), function(o) {
+  core_val <- evaluateCore(core, collection_data, objective(o, "PD"))
+  return(core_val)
+}, simplify = F)
+  core_ar <- allel.rich(collection_genind[core$sel])$mean.richness
+  eval$AR <- core_ar
+  eval$sel <- core$sel
+  return(eval)
+}
+
+
+# this function will sample randomly a certain times
+boot_core <- function(collection, size, iterations, collection_genind, included = NULL, excluded = NULL) {
+  core_eval <- sapply(1:iterations, function(i) {
+    ran_core <- sampleCore(collection, size = size/collection$size, 
+                       always.selected = c(sample(collection$names[!collection$name %in% excluded], (size - length(included))), included),
+                       steps = 1)
+    eval <- evaluateCore_full(ran_core, collection, collection_genind)
+    return(eval)
+  }, USE.NAMES = T, simplify = F)
+  return(core_eval)
+}
+
+# compare the hunter core vs the random cores using 1 of the objectives
+# and plot
+val_boot_core <- function(core_val, boot_core_val, obj, core_col = "gold3", sim_col = "lightyellow3", core_size = 1) {
+  c_val <- core_val[[obj]]
+  boot_val <- unlist(sapply(boot_core_val, function(e) e[obj], USE.NAMES = F))
+  eval <- data.frame(n = length(boot_val), val = boot_val)
+  p <- ggplot(eval) +
+    geom_histogram(aes(val), bins = 30, fill = sim_col) +
+    # geom_density(aes(val)) +
+    # geom_vline(xintercept = mean(boot_eval), linetype = "dashed") +
+    geom_vline(xintercept = c_val, color = core_col, size = core_size) +
+    xlab(obj) # xlab(paste("average", obj))
+  percentile <- sprintf("%.0f%%", mean(c_val > boot_val)*100)
+  print(percentile)
+  names(c_val) <- paste0("[", percentile, "]")
+  qt <- quantile(boot_val)
+  qt <- sort(c(qt, c_val))
+  print(qt)
+  return(p)
+}
+
+
+# eval_plots <- lapply(c("AN", "EN", "EE", "SH", "HE", "CV"), function(o) {
+#   cat(o, "\n")
+#   core_val <- evaluateCore(core, collection_data, objective(o, "PD"))
+#   pl <- val_boot_core(core_val, ran_cores, o)
+#   return(pl)
+# })
+# 
+# aplot::plot_list(eval_plots, ncol = 2)
+
+
+# this function compares hunter core vs random core vs full set using all objectives
+# plus allelic richness 
+# and plot all
+val_full_core <- function(full_genind, ev_core, ev_boot_cores, core_col = "gold3", full_col = "black", core_size = 1) {
+  core_genind <- full_genind[ev_core$sel]
+  boot_genind_list <- lapply(ev_boot_cores, function(b) vn_genind[b$sel])
+  # expected heterozygosity
+  full_he <- mean(summary(full_genind)$Hexp)
+  core_he <- mean(summary(core_genind)$Hexp)
+  # allelic richness
+  full_ar <- as.numeric(allel.rich(full_genind)$mean.richness)
+  core_ar <- as.numeric(allel.rich(core_genind)$mean.richness)
+  # pair-wise distance
+  full_dist <- as.vector(dist(genind2geno(full_genind, NA.code = NA)))
+  full_dist_mean <- mean(full_dist)
+  core_dist <- as.vector(dist(genind2geno(core_genind, NA.code = NA)))
+  core_dist_mean <- mean(core_dist)
+  # shannon
+  full_sh <- mean(diversity(genind2geno(full_genind), index = "shannon"))
+  full_set_eval <- data.frame(variable = c("HE", "AR"), full_set = c(full_he, full_ar), core_set = c(core_he, core_ar))
+  eval_plots <- lapply(c("AN", "EN", "EE", "SH", "HE", "CV", "AR", "DT"), function(o) {
+    cat(o, "\n")
+    
+    if (o == "DT") {
+      full_dist_df <- data.frame(n = length(full_dist), distance = full_dist)
+      core_dist_df <- data.frame(n = length(core_dist), distance = core_dist)
+      pl <- ggplot() +
+        geom_histogram(data = full_dist_df, aes(distance), fill = full_col, bins = 30) +
+        geom_histogram(data = core_dist_df, aes(distance), fill = core_col, bins = 30) +
+        xlab("Pairwise Euclidean distance") + ylab("Count")
+    } else {
+      pl <- val_boot_core(core_val = ev_core, boot_core_val = ev_boot_cores, obj = o)
+      if (o == "EE") {
+        pl <- pl + 
+          # geom_vline(xintercept = full_dist_mean, color = "black") +
+          geom_vline(xintercept = core_dist_mean, color = core_col, size = core_size)
+      } else if (o == "HE") {
+        pl <- pl + xlab("Expected heterozygosity") + ylab("Count")
+        # pl <- pl + geom_vline(xintercept = full_he, color = "black")
+      } else if (o == "AR") {
+        pl <- pl + xlab("Allelic richness") + ylab("Count")
+        # pl <- pl + geom_vline(xintercept = full_ar, color = "black")
+      }
+    }
+    pl <- pl + 
+      scale_y_continuous(expand = expansion(mult = c(0, 0.05))) +
+      theme_minimal() + 
+      theme(panel.grid.minor = element_blank(),
+            panel.grid.major = element_line(size = 0.4),
+            panel.background = element_rect(fill = NA, color = "gray50"),
+            axis.ticks = element_line(color = "black"))
+    return(pl)
+  })
+  
+  output <- list(plot = eval_plots, data.frame = full_set_eval)
+  return(output)
+  
+  }
+```
+
+<!-- *red line: the hunter core, black line: the full set* -->
+
+```{r evaluate_core, fig.height=10, fig.width=15, eval=FALSE}
+# ran_cores <- boot_core(collection = collection_data, size = 35, iterations = 1000, collection_genind = vn_genind)
+ran_cores <- readRDS("./genotyping/R_data/ran_cores.RDS")
+ev_core <- evaluateCore_full(core, collection_data, vn_genind)
+eval_plots <- val_full_core(full_genind = vn_genind, ev_core = ev_core, ev_boot_cores = ran_cores)
+plot_list(gglist = gglist(eval_plots$plot), nrow = 2)
+eval_plots$data.frame
+```
+
+```{r, include=FALSE, eval=FALSE}
+saveRDS(ran_cores, file = "./genotyping/R_data/ran_cores.RDS")
+```
+
+## Evaluate hunter core selected using less weight on AN  
+
+    - AN (representative) - weight = 0.5
+    - SH (diversity) - weight = 1  
+    - EN (redundancy) - weight = 1 
+    - always keep 4 plants  
+    - never select 10 TRs
+        
+```{r core_2, fig.height=10, fig.width=10, eval=FALSE}
+set.seed(567)
+core2 <- sampleCore(collection_data, size = 35/138, 
+                   obj = list(
+                     objective(type = "AN", measure = "PD", weight = 0.5), # representative
+                     objective(type = "EN", measure = "PD", weight = 1), # redundancy
+                     objective(type = "SH") # allelic diversity
+                     # objective(type = "EN", measure = "GD", weight = 1)
+                     # objective(type = "AN", measure = "GD", weight = 1) # 
+                     ),
+                   always.selected = c(
+                     vn_genind@strata %>% filter(nematode_resistance %in% c("S", "R")) %>% pull(code) %>% as.character, "S-76"),
+                     # "S-71", "S-76", "S-39", "S-95", "S-97"),
+                     # vn_genind@strata %>% filter(drought_tolerance %in% c("S", "R")) %>% pull(code) %>% as.character),
+                     never.selected = grep("TR", indNames(vn_genind), value = T),
+                   steps = 1000, impr.steps = 10)
+
+
+c2 <- ggplot(all_pca_proj %>% rowwise() %>% filter(code %in% core2$sel | source == "sample") %>% mutate(core = ifelse(code %in% core2$sel, "yes", "no")) %>% arrange(core)) +
+  # geom_point(aes(x = PC1, y = PC2, color = group), alpha = .5) +
+  geom_text(aes(x = PC1, y = PC2, label = label, color = core)) +
+  xlab(paste0("PC1 (", format(eigen[1]/sum(eigen)*100, digits = 2), "%)")) +
+  ylab(paste0("PC2 (", format(eigen[2]/sum(eigen)*100, digits = 2), "%)")) +
+  scale_color_manual(values = c("gray50", "brown"))
+c2
+```
+
+```{r evaluate_core_2, fig.height=10, fig.width=15, eval=FALSE}
+ev_core2 <- evaluateCore_full(core2, collection_data, vn_genind)
+eval_plots_2 <- val_full_core(full_genind = vn_genind, ev_core = ev_core2, ev_boot_cores = ran_cores)
+plot_list(gglist = gglist(eval_plots_2$plot), nrow = 2)
+```
+
+## Evaluate hunter core selected using only pairwise distance and allelic richness  
+
+    - SH (diversity) - weight = 1  
+    - EE (redundancy) - weight = 1 
+    - always keep 4 plants  
+    - never select 10 TRs
+        
+```{r core_3, fig.height=10, fig.width=10, eval=FALSE}
+always_selected <- c(vn_genind@strata %>% 
+    filter(nematode_resistance %in% c("S", "R")) %>% 
+    pull(code) %>% as.character, "S-76")
+set.seed(567)
+core3 <- sampleCore(collection_data, size = 35/138, 
+                   obj = list(
+                     # objective(type = "AN", measure = "PD", weight = 0.5), # representative
+                     objective(type = "EE", measure = "PD", weight = 1), # redundancy
+                     objective(type = "SH") # allelic diversity
+                     # objective(type = "EN", measure = "GD", weight = 1)
+                     # objective(type = "AN", measure = "GD", weight = 1) # 
+                     ),
+                   always.selected = always_selected,
+                     # "S-71", "S-76", "S-39", "S-95", "S-97"),
+                     # vn_genind@strata %>% filter(drought_tolerance %in% c("S", "R")) %>% pull(code) %>% as.character),
+                     never.selected = grep("TR", indNames(vn_genind), value = T),
+                   steps = 1000, impr.steps = 10)
+
+
+c3 <- ggplot(all_pca_proj %>% rowwise() %>% filter(code %in% core3$sel | source == "sample") %>% mutate(core = ifelse(code %in% core3$sel, "yes", "no")) %>% arrange(core)) +
+  # geom_point(aes(x = PC1, y = PC2, color = group), alpha = .5) +
+  geom_text(aes(x = PC1, y = PC2, label = label, color = core)) +
+  xlab(paste0("PC1 (", format(eigen[1]/sum(eigen)*100, digits = 2), "%)")) +
+  ylab(paste0("PC2 (", format(eigen[2]/sum(eigen)*100, digits = 2), "%)")) +
+  scale_color_manual(values = c("gray50", "brown"))
+c3
+
+
+ggplot(all_pca_proj %>% filter(code %in% core3$sel)) +
+  # geom_point(aes(x = PC1, y = PC2, color = group), alpha = .5) +
+  geom_text(aes(x = PC1, y = PC2, label = label)) +
+  xlab(paste0("PC1 (", format(eigen[1]/sum(eigen)*100, digits = 2), "%)")) +
+  ylab(paste0("PC2 (", format(eigen[2]/sum(eigen)*100, digits = 2), "%)")) +
+  facet_wrap(vars(nematode_resistance, drought_tolerance, high_yield, high_quality), labeller = "label_both")
+
+
+# datatable(accession %>% filter(code %in% core3$sel))
+accession %>% 
+  filter(code %in% core3$sel) %>% 
+  select(-order) %>% relocate(code) %>% 
+  write.table("./genotyping/core_selection/corehunter_selection_SH_EE_35_acc.tsv", row.names = F)
+```
+
+```{r evaluate_core_3, fig.height=10, fig.width=15, eval=FALSE}
+ev_core3 <- evaluateCore_full(core3, collection_data, vn_genind)
+eval_plots_3 <- val_full_core(full_genind = vn_genind, ev_core = ev_core3, ev_boot_cores = ran_cores)
+plot_list(gglist = gglist(eval_plots_3$plot), nrow = 2)
+```
+
+
+## Core selection with cutting available individuals
+
+    - SH (diversity) - weight = 1  
+    - EE (redundancy) - weight = 1 
+    - always keep 4 plants 
+    - never selected: 60 cutting unavail. + 10 TRs 
+
+```{r cutting_list, fig.height=10, fig.width=10}
+restr_list_file <- "./accessions/cuttings.xlsx"
+restr_list <- read_xlsx(restr_list_file)
+restr_list <- restr_list %>% 
+  dplyr::rename(code = Code) %>% 
+  mutate(code = ifelse(grepl("TR", Name), paste0(Name, "m"), code)) %>% 
+  select(code, "cuttings availability")
+
+never_selected <- indNames(vn_genind)[!indNames(vn_genind) %in% restr_list$code[restr_list$`cuttings availability` %in% c("high", "moderate")]]
+```
+
+
+```{r core_4, fig.height=10, fig.width=10, eval=FALSE}
+core4 <- sampleCore(collection_data, size = 35/138, 
+                   obj = list(
+                     objective(type = "EE", measure = "PD"), # redundancy
+                     objective(type = "SH") # allelic diversity
+                     ),
+                   always.selected = always_selected,
+                     never.selected = c(grep("TR", indNames(vn_genind), value = T), never_selected),
+                   steps = 1000, impr.steps = 10)
+
+
+c4 <- ggplot(all_pca_proj %>% rowwise() %>% filter(code %in% core4$sel | source == "sample") %>% mutate(core = ifelse(code %in% core4$sel, "yes", "no")) %>% arrange(core)) +
+  # geom_point(aes(x = PC1, y = PC2, color = group), alpha = .5) +
+  geom_text(aes(x = PC1, y = PC2, label = label, color = core)) +
+  xlab(paste0("PC1 (", format(eigen[1]/sum(eigen)*100, digits = 2), "%)")) +
+  ylab(paste0("PC2 (", format(eigen[2]/sum(eigen)*100, digits = 2), "%)")) +
+  scale_color_manual(values = c("gray50", "brown"))
+c4
+```
+
+
+```{r evaluate_core_4, fig.height=10, fig.width=15, eval=FALSE}
+ev_core4 <- evaluateCore_full(core4, collection_data, vn_genind)
+eval_plots_4 <- val_full_core(full_genind = vn_genind, ev_core = ev_core4, ev_boot_cores = ran_cores)
+plot_list(gglist = gglist(eval_plots_4$plot), nrow = 2)
+```
+
+## Core selection without museum individuals
+
+    - SH (diversity) - weight = 1  
+    - EE (redundancy) - weight = 1 
+    - always keep 4 plants 
+    - never selected: 11 Museum inds + 10 TRs 
+
+```{r core_5, fig.height=10, fig.width=10, eval=FALSE}
+core5 <- sampleCore(collection_data, size = 35/138, 
+                   obj = list(
+                     objective(type = "EE", measure = "PD"), # redundancy
+                     objective(type = "SH") # allelic diversity
+                     ),
+                   always.selected = always_selected,
+                     never.selected = c(grep("TR", indNames(vn_genind), value = T),
+                                        as.character(vn_genind@strata$code[grepl("G \\d", vn_genind@strata$identification)])),
+                   steps = 1000, impr.steps = 10)
+
+
+c5 <- ggplot(all_pca_proj %>% rowwise() %>% filter(code %in% core5$sel | source == "sample") %>% mutate(core = ifelse(code %in% core5$sel, "yes", "no")) %>% arrange(core)) +
+  # geom_point(aes(x = PC1, y = PC2, color = group), alpha = .5) +
+  geom_text(aes(x = PC1, y = PC2, label = label, color = core)) +
+  xlab(paste0("PC1 (", format(eigen[1]/sum(eigen)*100, digits = 2), "%)")) +
+  ylab(paste0("PC2 (", format(eigen[2]/sum(eigen)*100, digits = 2), "%)")) +
+  scale_color_manual(values = c("gray50", "brown"))
+c5
+```
+
+
+```{r evaluate_core_5, fig.height=10, fig.width=15, eval=FALSE}
+ev_core5 <- evaluateCore_full(core5, collection_data, vn_genind)
+eval_plots_5 <- val_full_core(full_genind = vn_genind, ev_core = ev_core5, ev_boot_cores = ran_cores)
+plot_list(gglist = gglist(eval_plots_5$plot), nrow = 2)
+```
+
+## FINAL Core selection (35 + 10 TRs)
+
+*Note: The most optimum strategy to select the core is to always include the 10 sequenced TRs and select 45 inds*
+
+    - SH (diversity) - weight = 1  
+    - EE (redundancy) - weight = 1 
+    - always keep 4 plants, 10 TRs 
+    - never selected: 11 Museum inds, 10 Apo inds, S-59 (Nestle), S-138 (dead)
+
+```{r core_6, fig.height=7, fig.width=8}
+included <- c((grep("TR", indNames(vn_genind), value = T)), # TR clones
+              vn_genind@strata %>% 
+                filter(nematode_resistance %in% c("S", "R")) %>% 
+                pull(code) %>% as.character, # nematode
+              "S-76") # drought
+excluded <- c(as.character(vn_genind@strata$code[grepl("G \\d|Apo", vn_genind@strata$identification)]), "S-59", "S-138")
+set.seed(567)
+core6 <- sampleCore(collection_data, size = 45/138, 
+                   obj = list(
+                     objective(type = "EE", measure = "PD"), # redundancy
+                     objective(type = "SH") # allelic diversity
+                     ),
+                   always.selected = included,
+                   never.selected = excluded,
+                   steps = 1000, impr.steps = 10)
+
+
+c6 <- ggplot(all_pca_proj %>% rowwise() %>% filter(code %in% core6$sel | source == "sample") %>% mutate(core = ifelse(code %in% core6$sel, "yes", "no")) %>% arrange(core)) +
+  # geom_point(aes(x = PC1, y = PC2, color = group), alpha = .5) +
+  geom_text(aes(x = PC1, y = PC2, label = label, color = core)) +
+  xlab(paste0("PC1 (", format(eigen[1]/sum(eigen)*100, digits = 2), "%)")) +
+  ylab(paste0("PC2 (", format(eigen[2]/sum(eigen)*100, digits = 2), "%)")) +
+  scale_color_manual(values = c("gray40", "darkred")) +
+  theme_minimal()
+c6
+```
+
+```{r core6_pca_traits, fig.height=12, fig.width=12}
+all_pca_proj %>% 
+  rowwise() %>% 
+  filter(code %in% core6$sel | source == "sample") %>% 
+  mutate(core = ifelse(code %in% core6$sel, "yes", "no")) %>% 
+  arrange(core) %>% 
+  ggplot() +
+  facet_wrap(vars(nematode_resistance, drought_tolerance, high_yield, high_quality), labeller = "label_both") +
+  geom_text(aes(x = PC1, y = PC2, label = label, color = core)) +
+  xlab(paste0("PC1 (", format(eigen[1]/sum(eigen)*100, digits = 2), "%)")) +
+  ylab(paste0("PC2 (", format(eigen[2]/sum(eigen)*100, digits = 2), "%)")) +
+  scale_color_manual(values = c("gray50", "brown"))
+
+accession %>% group_by(nematode_resistance, drought_tolerance, high_yield, high_quality) %>% summarise(n()) %>% knitr::kable()
+accession %>% filter(identification %in% gsub("m", "", core6$sel)| code %in% core6$sel) %>% group_by(nematode_resistance, drought_tolerance, high_yield, high_quality) %>% summarise(n()) %>% knitr::kable()
+```
+
+
+```{r evaluate_core_6, fig.height=10, fig.width=15}
+# ran_cores <- boot_core(collection = collection_data, size = 45, iterations = 1000, collection_genind = vn_genind, included = included, excluded = excluded)
+ran_cores <- readRDS("./genotyping/R_data/ran_cores.RDS")
+ev_core6 <- evaluateCore_full(core6, collection_data, vn_genind)
+eval_plots_6 <- val_full_core(full_genind = vn_genind, 
+                              ev_core = ev_core6, ev_boot_cores = ran_cores, 
+                              core_size = 1.2, full_col = "gray50")
+plot_list(gglist = gglist(eval_plots_6$plot), nrow = 2)
+```
+
+
+```{r evaluate_core_6_plus, fig.height=4, fig.width=8}
+plot_list(gglist = gglist(eval_plots_6$plot[c(5, 7, 8)]), nrow = 1,
+          labels = c("A", "B", "C"))
+eval_plots_6$data.frame
+saveRDS(eval_plots_6, "./genotyping/R_data/eval_core_6.RDS")
+```
+
+```{r snmf_core6, fig.height=5, fig.width=10}
+core_prop <- all_prop[[2]]
+levels(core_prop$ancestry) <- c("G", "ER", "A", "OB", "C", "D")
+cuttings_col <- sapply(unique(core_prop %>% filter(code %in% core6$sel) %>% pull(code)), function(c) {
+  cuttings <- restr_list$`cuttings availability`[restr_list$code == c]
+  col <- ifelse(cuttings == "low" || length(cuttings) == 0, "red", "black")
+  return(col)
+})
+ggplot(core_prop %>% filter(code %in% core6$sel)) +
+  geom_col(aes(x = code, y = proportion, fill = ancestry), position = position_stack()) + 
+  scale_fill_manual(values = viridis(8, option = "B")) +
+  xlab("individuals") +
+  ylab("ancestry proportion") +
+  labs(caption = "cutting availability \nhigh/moderate - black \tlow/NA - red") +
+  theme(axis.text.x = element_text(angle = 90, h = 1, v = .5, size = 6, color = cuttings_col),
+        axis.ticks.x = element_line(color = cuttings_col),
+        panel.background = element_rect(fill = "white"), 
+        panel.grid = element_line(color = "gray", size = .1)) 
+```
+
+
+```{r, include=FALSE, eval=FALSE}
+prop_core <- full_join(restr_list, all_prop_k, by = "code")
+prop_core <- prop_core %>% 
+  mutate(
+    # core3 = ifelse(code %in% core3$sel, "core", ""),
+    core4 = ifelse(code %in% core4$sel, "core", ""),
+    # core5 = ifelse(code %in% core5$sel, "core", ""),
+    core6 = ifelse(code %in% core6$sel, "core", ""))
+# write_tsv(prop_core, "./genotyping/core_selection/corehunter_selection_SH_EE_35_acc_cuttings.tsv")
+writexl::write_xlsx(prop_core, "./genotyping/core_selection/corehunter_selection_SH_EE_35_acc_cuttings.xlsx")
+```
+
+
+## Evaluate the core selected by AGI and WASI
+
+*red line: the AGI core, black line: the full set*
+
+```{r agi_core, fig.height=10, fig.width=10, eval=FALSE}
+agi_selection_file <- "./genotyping/core_selection/35acc_final_AGI_WASI.xlsx"
+agi_selection <- read_xlsx(agi_selection_file)
+agi_core <- sampleCore(collection_data, size = 35, 
+                       always.selected = sample(agi_selection$`Cc clone`, 35),
+                       step = 1)
+
+cA <- ggplot(all_pca_proj %>% rowwise() %>% filter(code %in% agi_core$sel | source == "sample") %>% mutate(core = ifelse(code %in% agi_core$sel, "yes", "no")) %>% arrange(core)) +
+  # geom_point(aes(x = PC1, y = PC2, color = group), alpha = .5) +
+  geom_text(aes(x = PC1, y = PC2, label = label, color = core)) +
+  xlab(paste0("PC1 (", format(eigen[1]/sum(eigen)*100, digits = 2), "%)")) +
+  ylab(paste0("PC2 (", format(eigen[2]/sum(eigen)*100, digits = 2), "%)")) +
+  scale_color_manual(values = c("gray50", "brown"))
+cA
+```
+
+
+```{r evaluate_agi_core, fig.height=10, fig.width=15, eval=FALSE}
+ev_agi_core <- evaluateCore_full(agi_core, collection_data, vn_genind)
+agi_eval_plots <- val_full_core(full_genind = vn_genind, ev_core = ev_agi_core, ev_boot_cores = ran_cores)
+plot_list(agi_eval_plots, nrow = 2)
+```
+
+<!-- ## Summary -->
+```{r sum_cores, fig.height=20, fig.width=40, include=FALSE, eval=FALSE}
+ce1 <- ggarrange(c1, ggarrange(plotlist = eval_plots, nrow = 1, ncol = 8), ncol = 2, nrow = 1, widths = c(1,6))
+ce2 <- ggarrange(c2, ggarrange(plotlist = eval_plots_2, nrow = 1, ncol = 8), ncol = 2, nrow = 1, widths = c(1,6))
+ce3 <- ggarrange(c3, ggarrange(plotlist = eval_plots_3, nrow = 1, ncol = 8), ncol = 2, nrow = 1, widths = c(1,6))
+ceA <- ggarrange(cA, ggarrange(plotlist = agi_eval_plots, nrow = 1, ncol = 8), ncol = 2, nrow = 1, widths = c(1,6))
+
+ggarrange(ce1, ce2, ce3, ceA, nrow = 4, ncol = 1, common.legend = T,
+          labels = c("1 - AN + EN + SH (equal weight)",
+                     "2 - AN (0.5) + EN (1) + SH (1)",
+                     "3 - EE + SH (equal weight)",
+                     "4 - selection by AGI + WASI"),
+          vjust = 1.2, hjust = -0.1)
+```
+
+```{r save_raw_genotypes, include=FALSE, eval=FALSE}
+seq_gi <- seq_ref_genind
+indNames(seq_gi) <- gsub("_TR", "m", indNames(seq_gi))
+seq_gi@strata <- seq_gi@strata %>% 
+  mutate(id = code, 
+         code = gsub("_\\D+", "", as.character(code)))
+kasp_gi <- sample_genind
+indNames(kasp_gi) <- gsub("_P\\d+", "", indNames(kasp_gi))
+indNames(kasp_gi) <- sapply(indNames(kasp_gi), function(x) ifelse(grepl("S-", x), x, paste0(x, "_kasp")))
+array_gi <- array_genind
+array_gi@strata <- array_gi@strata %>% 
+  mutate(id = code, 
+         code = gsub("_\\D+", "", code))
+
+super_genind <- repool(seq_gi, array_gi, kasp_gi)
+super_genind <- super_genind[loc = locNames(all_genind)[!locNames(all_genind) %in% failed_snps]]
+snp_261_info <- snp_268_info %>% 
+  mutate(ID = gsub("\\.", "_", ID)) %>% 
+  filter(ID %in% locNames(super_genind)) %>% 
+  mutate(ID = factor(ID, locNames(super_genind))) %>%
+  arrange(ID) 
+super_geno <- genind2geno(super_genind, ref_allele = snp_261_info$REF, NA.code = NA)
+dim(super_geno)
+raw_geno_dir <- "./genotyping/raw_genotype"
+dir.create(raw_geno_dir)
+write.table(super_geno %>% rownames_to_column("code"), file.path(raw_geno_dir, "seq_kasp_array_genotypes_261SNPs.tsv"), col.names = T, row.names = F, sep = "\t")
+super_data <- sapply(indNames(super_genind), function(i) case_when(grepl("array", i) ~ "array",
+                                                                   grepl("_P\\d+", i) ~ "kasp",
+                                                                   TRUE ~ "seq"))
+super_source <- sapply(indNames(super_genind), function(i) ifelse(grepl("S-\\d+", i), "VN", "AF"))
+super_type <- sapply(indNames(super_genind), function(i) case_when(i %in% indNames(ref_genind) ~ "reference",
+                                                                   i %in% indNames(vn_genind) ~ "sample"))
+source_init_ref <- sapply(indNames(super_genind), function(i) ifelse(i %in% indNames(all_ref_genind), TRUE, FALSE))
+super_info <- data.frame(code = indNames(super_genind), 
+                         data = super_data, 
+                         source = super_source, 
+                         analysis = super_type,
+                         initial_ref = source_init_ref)
+write.table(super_info, file.path(raw_geno_dir, "seq_kasp_array_info.tsv"), col.names = T, row.names = F, sep = "\t")
+write.table(snp_261_info, file.path(raw_geno_dir, "snp_261_info.tsv"), col.names = T, row.names = F, sep = "\t")
+```
+
+
+```{r genotype_db, include=FALSE, eval=FALSE}
+# Create an ephemeral in-memory RSQLite database
+con <- dbConnect(RSQLite::SQLite(), dbname = "./genotyping/seq_kasp_array_genotypes_261SNPs.db")
+
+dbListTables(con)
+dbWriteTable(con, "genotype", super_geno, row.names = "code", overwrite = T)
+dbWriteTable(con, "info", super_info, overwrite = T)
+dbWriteTable(con, "vn_info", accession, overwrite = T)
+dbWriteTable(con, "kasp_info", plate, overwrite = T)
+dbWriteTable(con, "seq_info", ref_info %>% mutate(code = gsub("_\\D{1,2}$", "", code)), overwrite = T)
+dbWriteTable(con, "array_info", can_array_passport, overwrite = T)
+dbWriteTable(con, "snp_info", snp_261_info, overwrite = T)
+dbWriteTable(con, "ref_info", left_join(s, new_assign, by = "code"), overwrite = T)
+dbListTables(con)
+
+# core set
+core <- read_xlsx("./genotyping/core_selection/corehunter_selection_SH_EE_35_acc_cuttings_20211020.xlsx")
+core <- core %>% filter(!is.na(core6) | grepl("TR", identification)) %>% select(-core6)
+dbWriteTable(con, "core_vn", core, overwrite = T)
+dbDisconnect(con)
+```
+
+
+# structure of 55 African + 45 VN
+## snmf core + african
+```{r get_genotypes}
+con <- dbConnect(RSQLite::SQLite(), dbname = "./genotyping/seq_kasp_array_genotypes_261SNPs.db")
+core <- dbReadTable(con, "core_vn")
+ref <- dbReadTable(con, "seq_info")
+geno <- dbReadTable(con, "genotype")
+dbDisconnect(con)
+
+geno <- geno %>% filter(code %in% c(core$code, paste(ref$code, ref$kasp_group, sep = "_")))
+geno <- geno %>% column_to_rownames("code")
+geno[is.na(geno)] <- 9
+
+ref <- ref %>% mutate(seq_name = paste(code, kasp_group, sep = "_"))
+rownames(geno) <- sapply(rownames(geno), 
+                         function(i) ifelse(grepl("(S-|TR).+", i), i, ref$Label[ref$seq_name == i]),
+                         USE.NAMES = F)
+```
+
+```{r run_snmf_core_af, results='hide', eval=FALSE}
+snmf_dir <- "./genotyping/core_selection/snmf"
+dir.create(snmf_dir)
+geno_file <- file.path(snmf_dir, "core_af.geno")
+write.geno(geno, geno_file) # geno[!grepl("S-|TR", rownames(geno)),]
+core_af_snmf <- snmf(geno_file, K = 1:10, repetitions = 100, CPU = 2, entropy = T, seed = 123, project = "new")
+plot(core_af_snmf)
+```
+
+
+
+```{r get_snmf_core_af, include=FALSE}
+core_af_snmf <- load.snmfProject("./genotyping/core_selection/snmf/core_af.snmfProject")
+```
+
+
+```{r plot_snmf_core_af}
+k <- 6
+bestrun <- which.min(cross.entropy(core_af_snmf, K = k))
+core_af_prop <- as.data.frame(Q(core_af_snmf, K = k, run = bestrun))
+core_af_prop$code <- rownames(geno) # geno[!grepl("S-|TR", rownames(geno)),]
+#colnames(core_af_prop)[1:5] <- c("O", "")
+ind <- LEA::barchart(core_af_snmf, K = k, run = bestrun, sort.by.Q = T, plot = F)
+
+core_af_prop %>% 
+  mutate(code = factor(code, levels = code[ind$order])) %>% 
+  pivot_longer(cols = !starts_with("code"), names_to = "ancestry", values_to = "proportion") %>% 
+  mutate(ancestry = factor(ancestry, levels = c("V5", "V4", "V3", "V6", "V1", "V2"))) %>% 
+  ggplot(aes(x = code, y = proportion, fill = ancestry)) + 
+  geom_col(width = 1) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, h = 1, v = 0.5)) +
+  scale_fill_viridis_d(option = "B", end = .8)
+```
+
+## snmf on african
+
+
+
+
+```{r run_snmf_af1, results='hide'}
+snmf_dir <- "./genotyping/core_selection/snmf"
+dir.create(snmf_dir)
+geno_file <- file.path(snmf_dir, "af.geno")
+af_geno <- geno[!grepl("^(S-|TR)", rownames(geno)),]
+```
+
+```{r get_snmfaf, include=FALSE}
+af_snmf <- load.snmfProject("./genotyping/core_selection/snmf/af.snmfProject")
+```
+
+```{r run_snmf_af2, results='hide', eval=FALSE}
+write.geno(af_geno, geno_file) # geno[!grepl("S-|TR", rownames(geno)),]
+af_snmf <- snmf(geno_file, K = 1:10, repetitions = 100, CPU = 2, entropy = T, seed = 123, project = "new")
+plot(af_snmf)
+```
+
+```{r plot_snmf_af}
+k <- 5
+bestrun <- which.min(cross.entropy(af_snmf, K = k))
+af_prop <- as.data.frame(Q(af_snmf, K = k, run = bestrun))
+af_prop$code <- rownames(af_geno) # geno[!grepl("S-|TR", rownames(geno)),]
+#colnames(core_af_prop)[1:5] <- c("O", "")
+ind <- LEA::barchart(af_snmf, K = k, run = bestrun, sort.by.Q = T, plot = F)
+
+af_prop %>% 
+  mutate(code = factor(code, levels = code[ind$order])) %>% 
+  pivot_longer(cols = !starts_with("code"), names_to = "ancestry", values_to = "proportion") %>% 
+  mutate(ancestry = factor(ancestry, levels = c("V5", "V2", "V3", "V4", "V1"))) %>% 
+  ggplot(aes(x = code, y = proportion, fill = ancestry)) + 
+  geom_col(width = 1) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, h = 1, v = 0.5)) +
+  scale_fill_viridis_d(option = "B", end = .8)
+```
+
+
+## pca on core + african
+```{r pca_core_af, results=FALSE}
+# ref_genind <- ref_genind[loc = locNames(ref_genind)[!locNames(ref_genind) %in% failed_snps]]
+lfmm_file <- tempfile(fileext = ".lfmm")
+write.lfmm(geno, lfmm_file)
+core_af_pca <- pca(lfmm_file, scale = F)
+# remove.pcaProject(ref_pca@pcaProject.file)
+core_af_proj <- data.frame("code" = rownames(geno),
+                           "label" = gsub(".+\\_", "", rownames(geno)),
+                           "PC1" = core_af_pca$projections[,1],
+                           "PC2" = core_af_pca$projections[,2],
+                           "PC3" = core_af_pca$projections[,3])
+core_af_proj <- core_af_proj %>% mutate(pop = ifelse(grepl("^(S-|TR)", label), NA, label))
+core_af_proj <- core_af_proj %>% mutate(pop = factor(pop, levels = c("A", "B", "C", "D", "E", "G", "O", "R", "hb", NA)))
+```
+
+```{r pca_core_af_plot}
+eigen <- core_af_pca$eigenvalues[,1]
+pdf("./genotyping/plots/core_VN_pca_261kasp.pdf")
+ggplot(core_af_proj[nrow(core_af_proj):1,]) +
+  # geom_point(aes(x = PC1, y = PC2, color = group), alpha = .5) +
+  geom_text(aes(x = PC1, y = PC2, label = label, color = pop), show.legend = F, size = 6) +
+  xlab(paste0("PC1 (", format(eigen[1]/sum(eigen)*100, digits = 2), "%)")) +
+  ylab(paste0("PC2 (", format(eigen[2]/sum(eigen)*100, digits = 2), "%)")) +
+  theme_minimal() +
+  theme(axis.title = element_text(size = 15), panel.border = element_rect(color = "gray", fill = NA))
+dev.off()
+
+ggplot(core_af_proj) +
+  geom_text(aes(x = PC1, y = PC3, label = label, color = pop)) +
+  xlab(paste0("PC1 (", format(eigen[1]/sum(eigen)*100, digits = 2), "%)")) +
+  ylab(paste0("PC3 (", format(eigen[3]/sum(eigen)*100, digits = 2), "%)"))
+```
+
+## pca on african
+
+```{r pca_af, results=FALSE}
+# ref_genind <- ref_genind[loc = locNames(ref_genind)[!locNames(ref_genind) %in% failed_snps]]
+lfmm_file <- tempfile(fileext = ".lfmm")
+write.lfmm(af_geno, lfmm_file)
+af_pca <- pca(lfmm_file, scale = F)
+# remove.pcaProject(ref_pca@pcaProject.file)
+af_proj <- data.frame("code" = rownames(af_geno),
+                           "label" = gsub(".+\\_", "", rownames(af_geno)),
+                           "PC1" = af_pca$projections[,1],
+                           "PC2" = af_pca$projections[,2],
+                           "PC3" = af_pca$projections[,3])
+af_proj <- af_proj %>% mutate(pop = ifelse(grepl("^(S-|TR)", label), NA, label))
+af_proj <- af_proj %>% mutate(pop = factor(pop, levels = c("A", "B", "C", "D", "E", "G", "O", "R", "hb", NA)))
+```
+
+```{r pca_af_plot}
+eigen <- af_pca$eigenvalues[,1]
+pdf("./genotyping/plots/af_pca_261kasp.pdf")
+ggplot(af_proj[nrow(af_proj):1,]) +
+  # geom_point(aes(x = PC1, y = PC2, color = group), alpha = .5) +
+  geom_text(aes(x = PC1, y = PC2, label = label, color = pop), show.legend = F, size = 6) +
+  xlab(paste0("PC1 (", format(eigen[1]/sum(eigen)*100, digits = 2), "%)")) +
+  ylab(paste0("PC2 (", format(eigen[2]/sum(eigen)*100, digits = 2), "%)"))  +
+  theme_minimal() +
+  theme(axis.title = element_text(size = 15), panel.border = element_rect(color = "gray", fill = NA))
+dev.off()
+
+ggplot(af_proj) +
+  geom_text(aes(x = PC1, y = PC3, label = label, color = pop)) +
+  xlab(paste0("PC1 (", format(eigen[1]/sum(eigen)*100, digits = 2), "%)")) +
+  ylab(paste0("PC3 (", format(eigen[3]/sum(eigen)*100, digits = 2), "%)"))
+```

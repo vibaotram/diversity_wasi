@@ -1,0 +1,1235 @@
+---
+title: "Selection of SNPs for genotyping of 157 Vietnamese Robusta plants"
+author: "Tram"
+date: "`r Sys.Date()`"
+output: 
+# html_document
+  xaringan::moon_reader:
+    self_contained: true
+    lib_dir: libs
+    css: [robot, robot-fonts]
+    nature:
+      ratio: 16:9
+---
+
+<style type="text/css">
+body, td {
+   font-size: 12px;
+}
+code.r {
+  font-size: 14px;
+}
+
+code.bash {
+  font-size: 14px;
+  color: #fff;
+}
+
+pre {
+  font-size: 12px
+}
+
+.remark-slide-content h1 {
+    font-size: 26px;
+    color: #104687;
+}
+
+.remark-slide-content h2 {
+    font-size: 22px;
+    color: #104687;
+}
+
+.remark-slide-content h3 {
+    font-size: 18px;
+}
+
+.remark-slide-content {
+    font-size: 15px;
+}
+
+.remark-code {
+  font-size: 15px;
+}
+
+
+</style>
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(eval = TRUE)
+knitr::opts_chunk$set(dev = "svg")
+knitr::opts_knit$set(root.dir = "/data3/projects/vietcaf/baotram/scripts/robusta_vn/genotyping")
+knitr::opts_chunk$set(cache = TRUE, cache.path = "/data3/projects/vietcaf/baotram/scripts/robusta_vn/genotyping/cache/")
+# # setwd("/data3/projects/vietcaf/baotram/scripts/robusta_vn/genotyping")
+library(dplyr)
+library(magrittr)
+library(Biostrings)
+library(Rsamtools)
+library(karyoploteR)
+library(DT)
+library(GenomicRanges)
+library(vcfR)
+library(DT)
+library(readr)
+library(ggplot2)
+library(poppr)
+library(pegas)
+library(viridis)
+library(lattice)
+library(magrittr)
+library(reshape2)
+library(PopGenReport)
+library(gplots)
+library(ggrepel)
+library(LEA)
+library(adegenet)
+library(tibble)
+library(readxl)
+library(ggdendro)
+library(VariantAnnotation)
+library(rtracklayer)
+library(GenomicFeatures)
+library(S4Vectors)
+```
+
+<p, ul style="font-size:200%;">
+
+- **Objectives of the genotyping**
+  - remove closely related or redundant individuals
+  - select varieties for deeper analyses (sequencing) based on genetic originality and agronomical traits
+
+- **Materials**
+  - Leaves of 157 Robusta varieties collected in the central highlands VN.  
+    Various sources including:  
+        - Collected in production
+        - Elite varieties
+        - F1 and parents
+        - Imported from Brazil (few years ago)  
+    Some varieties represent beneficial traits: high yield, nematode resistance, drought tolerance
+  - Resequencing data of 55 wild accessions from Africa + 10 VN Robusta mapped on reference genome (Denoeud et al. 2014) v1.8
+
+- **Methods**:  
+  1. selection of SNP panel
+  2. genotyping and analysis
+
+</p, ul>
+
+---
+
+# Selection of snps panel  
+
+
+
+- [Merot-L’Anthoene et al. (2019)](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC6576098/) reported the development of an 8.5K SNP array, of which 5530 were discovered from *C. canephora*.
+<!-- - A study selected 192 SNP markers from the 8.5K array for population structure analysis and mislabel detection of *C. canephora* germplasm collections ([Akpertey et al. (2020)]((https://www.frontiersin.org/articles/10.3389/fpls.2020.612593/full))). -->
+
+**Objectives**:  
+  <!-- 1. locate 192 SNPs on the reference genome   -->
+  1. locate 8.5k SNPs on the reference genome
+  2. obtain the reference genotypes at these SNP positions  
+  3. filter and select SNPs that well discriminate the genetic groups
+
+
+
+---
+
+## Map the SNP positions to the new reference genome
+### create snp sequences with 1 allele on SNP position
+```{r snp_seqs_192, eval=FALSE, echo=FALSE}
+snps_file <- "snp_panels/kaspar_192_snps.tsv"
+snps_info <- read.delim(snps_file, strip.white = T)
+seq1 <- DNAStringSet(gsub("\\[|/\\D\\]", "", snps_info$flanking_sequences))
+names(seq1) <- paste(snps_info$snp_ID, snps_info$chromosome, snps_info$genome_location, sep = "_")
+writeXStringSet(seq1, "kaspar_192_snps_seq1.fasta")
+```
+
+```{r snp_seqs_8.5k, eval=TRUE}
+snps_file <- "snp_panels/kaspar_8.5k_SNPs.tsv"
+snps_info <- read.delim(snps_file, strip.white = T)
+seq1 <- DNAStringSet(gsub("\\[|/\\D\\]", "", snps_info$Sequence))
+names(seq1) <- snps_info$Name
+writeXStringSet(seq1, "snp_panels/kaspar_8.5k_snps_seq1.fasta")
+```
+
+---
+
+### find the snp sequences on genome using blastn
+
+```{bash login, include=FALSE, eval=FALSE}
+ssh baotram@bioinfo-master.ird.fr
+module load bioinfo/blast/2.10.0+
+cd /data3/projects/vietcaf/baotram/scripts/robusta_vn/genotyping/snp_panels
+srun --pty bash -i
+```
+
+
+```{bash blast_192, eval=FALSE, echo=FALSE}
+blastn \
+-subject /data3/projects/vietcaf/reference/CC1.8_v2_pseudomolecule_cat.fa \
+-query kaspar_192_snps_flank1.fasta \
+-out kaspar_192_snps_blast1_result.txt \
+-outfmt "6 qacc sacc sstart send pident gaps mismatch length evalue" \
+-gapopen 100 -gapextend 100
+```
+
+```{bash blast_8.5k, eval=FALSE}
+blastn \
+-subject /data3/projects/vietcaf/reference/CC1.8_v2_pseudomolecule_cat.fa \
+-query kaspar_8.5k_snps_seq1.fasta \
+-out kaspar_8.5k_snps_blast1_result.txt \
+-outfmt "6 qacc sacc sstart send pident gaps mismatch length evalue" \
+-gapopen 100 -gapextend 100
+```
+
+---
+
+### filter blast result, remove duplicated hits, hits with gaps and nb of mismatches > 2
+
+remove hits with gaps and nb of mismatches > 2:
+```{r blast_results_192, echo=FALSE, eval=FALSE}
+blast_res <- read.delim("snp_panels/kaspar_192_snps_blast1_result.txt", stringsAsFactors = F, header = F)
+colnames(blast_res) <- c("snp_ID", "mapped_chr", "mapped_start", "mapped_end", "identity", "gaps", "mismatches", "align_length", "evalue")
+
+blast_res %<>% filter(mismatches < 2, align_length == 121) %>% dplyr::mutate(snp_pos = (mapped_start + mapped_end)/2, .after = "mapped_chr")
+# write.table(blast_res, "blast_results_192_snps.tsv", row.names = F, col.names = T, sep = "\t")
+cat(" number of hits:", nrow(blast_res), "\n", "number of snps:", length(unique(blast_res$snp_ID)))
+datatable(blast_res, options = list(pageLength=8))
+```
+
+```{r blast_results_8.5k}
+blast_res <- read.delim("snp_panels/kaspar_8.5k_snps_blast1_result.txt", stringsAsFactors = F, header = F)
+colnames(blast_res) <- c("snp_ID", "mapped_chr", "mapped_start", "mapped_end", "identity", "gaps", "mismatches", "align_length", "evalue")
+
+blast_res %<>% filter(mismatches < 2, align_length == 121) %>% dplyr::mutate(snp_pos = (mapped_start + mapped_end)/2, .after = "mapped_chr")
+# write.table(blast_res, "blast_results_192_snps.tsv", row.names = F, col.names = T, sep = "\t")
+cat(" number of hits:", nrow(blast_res), "\n", "number of snps:", length(unique(blast_res$snp_ID)))
+head(blast_res)
+```
+
+---
+
+remove duplicated hits:
+```{r filter1}
+dup_hits <- blast_res[duplicated(blast_res[c("mapped_chr", "snp_pos")]),]
+unique_hits <- blast_res %>% distinct(mapped_chr, snp_pos, .keep_all = T)
+cat(nrow(dup_hits), "snps have duplicated positions")
+datatable(blast_res %>% filter(mapped_chr %in% dup_hits$mapped_chr, snp_pos %in% dup_hits$snp_pos) %>% arrange(snp_pos))
+```
+
+---
+
+
+remove snps have more than 1 hit:
+```{r filter2}
+dup_snps <- unique_hits %>% filter(snp_ID %in% snp_ID[duplicated(unique_hits$snp_ID)])
+mapped_snps <- unique_hits %>% filter(!snp_ID %in% dup_snps$snp_ID)
+cat(length(unique(dup_snps$snp_ID)), "snps have more than 1 hit")
+datatable(blast_res %>% filter(snp_ID %in% dup_snps$snp_ID), options = list(pageLength=8))
+```
+
+```{r mapping_result, echo=FALSE}
+mapped_8ksnps_file <- "./snp_panels/mapped_8k_snps.tsv"
+# write.table(mapped_snps %>% dplyr::select(mapped_chr, snp_pos) , mapped_8ksnps_file, sep = "\t", row.names = F, col.names = F, quote = F)
+cat("Number of SNPs that are mapped to the new genome:", nrow(mapped_snps), "out of", nrow(snps_info))
+```
+
+
+---
+
+## Get reference genotypes
+
+Reference data: 65 individuals, ~11M biallelic sites
+
+```{bash, eval=FALSE, include=FALSE}
+cd /data3/projects/vietcaf/baotram/scripts/robusta_vn/genotyping/ref_genotypes
+```
+
+
+```{bash vcftools, eval=FALSE}
+vcftools \
+--vcf /data3/projects/vietcaf/baotram/vietcaf_general_DP_missing_indv_singletons_Filtered_biallelic.recode.vcf \
+--positions mapped_8k_snps.tsv \
+--out vietcaf_final_kaspar_8k_SNPs \
+--recode 
+```
+<!-- 162 SNPs are kept   -->
+<!-- => 22 sites are not biallelic sites in the reference population -->
+
+5255 SNPs are kept
+
+---
+
+
+## Some information of the SNP dataset
+
+```{r vcf_file, include=FALSE}
+vcf_file <- "ref_genotypes/vietcaf_final_kaspar_8k_SNPs.recode.vcf"
+```
+
+### Distribution of selected SNPs
+
+
+```{r snp_species_1, results=FALSE, warning=FALSE, message=FALSE, fig.height=4, fig.width=4, fig.align="left", eval=TRUE, echo=FALSE}
+# read vcf file
+kaspSNPs_vcfR <- read.vcfR(vcf_file)
+kaspSNPs <- kaspSNPs_vcfR %>% getFIX() %>% as.data.frame()
+# get snp info of selected snps
+snps <- merge(kaspSNPs, blast_res, by.y = c("mapped_chr", "snp_pos"), by.x = c("CHROM", "POS")) 
+snps <- merge(snps, snps_info, by.x = "snp_ID", by.y = "Name")
+# total nb of snps per species
+ggplot(snps) +
+  geom_bar(aes(x = Discovery.Species, fill = Discovery.Species)) + 
+  ggtitle("Total number of species-specific SNPs")
+```
+
+
+```{r snp_species_2, results=FALSE, warning=FALSE, message=FALSE, fig.height=6, fig.width=8, fig.align="right", eval=FALSE, echo=FALSE}
+# total nb of snps per species over chromosomes
+ggplot(snps) +
+  geom_bar(aes(x = CHROM, fill = Discovery.Species)) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.5)) +
+  ggtitle("Total number of species-specific SNPs over chromosomes")
+```
+
+---
+
+```{r snps_distribution, results=FALSE, warning=FALSE, message=FALSE, fig.height=8, fig.width=15, eval=TRUE, echo=FALSE}
+# genome
+genome_fa <- "/data3/projects/vietcaf/reference/CC1.8_v2_pseudomolecule_cat.fa"
+genome <- scanFa(genome_fa)
+genome <- genome[grepl("Chr", names(genome))] # remove contigs
+names(genome) <- gsub(" .+", "", names(genome))
+genome_GR <- GRanges(seqnames = names(genome), ranges = IRanges(start = 1, end = width(genome)))
+
+# snps
+allSNP_GR <- GRanges(seqnames = blast_res$mapped_chr, ranges = IRanges(blast_res$snp_pos))
+mappedSNP_GR <- GRanges(seqnames = mapped_snps$mapped_chr, ranges = IRanges(mapped_snps$snp_pos))
+
+# kaspSNPs <- read.vcfR("vietcaf_final_kaspar_SNPs.recode.vcf") %>% getFIX() %>% as.data.frame()
+
+
+kaspSNPs_GR <- GRanges(seqnames = kaspSNPs$CHROM, ranges = IRanges(kaspSNPs$POS))
+snp_perCh <- kaspSNPs %>% group_by(CHROM) %>% summarise(n = n())
+
+
+gkp <- plotKaryotype(genome = genome_GR, plot.type = 6) 
+# kpDataBackground(gkp, data.panel ="ideogram", color = "gray10")
+kpAddBaseNumbers(gkp, tick.dist = 1e7)
+kpPlotRegions(gkp, data = GenomicRanges::setdiff(allSNP_GR, mappedSNP_GR), data.panel = "ideogram", col = "gold", avoid.overlapping = F, lty = "dotted")
+kpPlotRegions(gkp, data = GenomicRanges::setdiff(mappedSNP_GR, kaspSNPs_GR), data.panel = "ideogram", col = "darkred", avoid.overlapping = F, lty = "dotted")
+kpPlotRegions(gkp, data = kaspSNPs_GR, data.panel = "ideogram", col = "steelblue", avoid.overlapping = F)
+kpAddMainTitle(gkp, "Distribution of the selected SNPs\n(yellow: removed after blast, red: removed after vcftools, blue: selected after vcftools)")
+kpAddChromosomeNames(gkp, paste(snp_perCh$n, "snps"), yoffset = -20)
+```
+
+
+
+---
+
+
+<!-- ### Basic statistics -->
+
+
+```{r retrieve_snmf, fig.width=7, fig.height=3, eval=FALSE, echo=FALSE}
+snmf_plot <- readRDS("/data3/projects/vietcaf/baotram/scripts/robusta_vn/test_10_clones/snmf_random_10perc_SNPs/allsnmf_plot.Rds")
+snmf_plot + theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+ancestry_prop <- readRDS("/data3/projects/vietcaf/baotram/scripts/robusta_vn/test_10_clones/snmf_random_10perc_SNPs/allsnmf_proportion.Rds")
+```
+
+<!-- assign groups based on snmf result of 1.2M random snps -->
+```{r summary, message=FALSE, warning=FALSE, eval=FALSE, echo=FALSE}
+# select "pure" individuals (<20% admixture based on snmf result)  
+ancestry_prop %<>% 
+  group_by(id) %>% mutate(pop = ancestry[which.max(proportion)]) %>% 
+  mutate(pop = ifelse(max(proportion) < 0.8,  "admixed", as.character(unique(pop)))) %>% 
+  distinct(id, ancestry, .keep_all = T)
+```
+
+
+```{r summary_data, message=FALSE, warning=FALSE, eval=FALSE, echo=FALSE}
+kaspSNPs_vcfR <- read.vcfR(vcf_file, verbose = F)
+kaspSNPs_vcfR@fix[,1] <- gsub("\\.", "_", kaspSNPs_vcfR@fix[,1])
+kaspSNPs <- as.data.frame(getFIX(kaspSNPs_vcfR))
+kaspSNPs_gi <- vcfR2genind(kaspSNPs_vcfR)
+kaspSNPs_gi@pop <- as.factor(sapply(rownames(kaspSNPs_gi@tab), function(i) unique(ancestry_prop$pop[gsub("_.+", "", ancestry_prop$id) == i])))
+table(kaspSNPs_gi@pop)
+```
+
+
+
+<!-- --- -->
+
+<!-- ### Missing data in each locus: -->
+
+```{r missing_data, fig.width=10, fig.height=6, fig.align="center", fig.show=FALSE, eval=FALSE, echo=FALSE}
+missing <- info_table(kaspSNPs_gi, plot = T, low = "white", high = "red", percent = T, returnplot = T, plotlab = F)
+```
+
+
+```{r plot_missing_data, fig.width=10, fig.height=6, fig.align="center", eval=FALSE, echo=FALSE}
+missing$plot + theme(axis.text.x = element_blank())
+```
+ 
+<!-- --- -->
+<!-- ### Allele frequencies -->
+
+<!-- allele frequencies in each group: -->
+
+```{r all_freq, message=FALSE, warning=FALSE, results=FALSE, fig.show='hide', eval=FALSE, echo=FALSE}
+all_freq <- makefreq(genind2genpop(kaspSNPs_gi))
+all_freq <- all_freq[,grep(".1", colnames(all_freq), fixed = T)] # remove REF alleles
+heatmap.2(all_freq, 
+          dendrogram = "none", trace = "none", 
+          density.info = "none", key.xlab = "ALT allele frequency", key.title = NA,
+          col = cividis(100), xlab = "SNP",
+          labCol = NA)
+```
+
+<!-- --- -->
+
+```{r all_freq_plot, fig.width=14, fig.height=8, eval=FALSE, echo=FALSE}
+heatmap.2(all_freq, 
+          dendrogram = "none", trace = "none", 
+          density.info = "none", key.xlab = "ALT allele frequency", key.title = NA,
+          col = cividis(100), colsep = 0, 
+          xlab = "SNP", labCol = NA)
+```
+
+<!-- --- -->
+
+<!-- alleles occur in only 1 population: -->
+
+
+<!-- Only groups AG and D have unique alleles... -->
+
+<!-- Frequencies of unique alleles: -->
+<!-- Fixed alleles in each population: -->
+```{r, eval=FALSE, echo=FALSE}
+pri_all <- private_alleles(kaspSNPs_gi, count.alleles = F)
+rowSums(pri_all)
+uni_freq <- as.data.frame(t(all_freq[, which(colnames(all_freq) %in% colnames(pri_all))]))
+fix_all <- uni_freq %>% rowwise() %>% dplyr::filter(any(across(cols = everything()) == 1))
+colSums(fix_all)
+```
+
+
+<!-- --- -->
+
+<!-- combine group OB and ER together to see if there are unique alleles in this big group: -->
+```{r, eval=FALSE, echo=FALSE}
+kaspSNPs_gi@strata <- data.frame(big_groups = kaspSNPs_gi@pop)
+levels(kaspSNPs_gi@strata$big_groups)[levels(kaspSNPs_gi@strata$big_groups) %in% c("ER","OB")] <- "congo"
+private_alleles(kaspSNPs_gi, alleles ~ big_groups, count.alleles = F) %>% rowSums()
+```
+
+
+
+<!-- ### HWE test -->
+
+```{r hwe, fig.width=7, fig.height=4, echo=FALSE, eval=FALSE}
+hwe.pop <- seppop(kaspSNPs_gi) %>% lapply(hw.test, B = 1000) %>% 
+  sapply(., "[", i = TRUE, j = 3)
+hwe.pop <- reshape2::melt(hwe.pop)
+colnames(hwe.pop) <- c("snp", "pop", "p_value")
+ggplot(nanhwe.pop) +
+  geom_tile(aes(x = snp, y = pop, fill = p_value)) +
+  scale_fill_gradient(high = "white")
+```
+
+<!-- --- -->
+
+<!-- ### PCA -->
+
+```{r pca12, fig.width=8, fig.height=4, fig.align='center', warning=FALSE, eval=FALSE, echo=FALSE}
+kaspSNPs_gl <- vcfR2genlight(kaspSNPs_vcfR)
+```
+
+
+```{r pca12a, fig.width=8, fig.height=4, fig.align='center', warning=FALSE, eval=FALSE, echo=FALSE}
+pca <- glPca(kaspSNPs_gl, nf = 4)
+pca$scores %<>% as.data.frame %>% dplyr::mutate(pop = sapply(kaspSNPs_gl@ind.names, function(i) unique(ancestry_prop$pop[gsub("_.+", "", ancestry_prop$id) == i])))
+```
+
+
+```{r pca12b, fig.width=8, fig.height=4, fig.align='center', warning=FALSE, eval=FALSE, echo=FALSE}
+pca$scores$ind <- kaspSNPs_gl@ind.names
+pca$scores$ind[!grepl("TR.+", pca$scores$ind)] <- NA
+ggplot(pca$scores) +
+  geom_point(aes(x = PC1, y = PC2, color = pop), size = 1.5) + 
+  geom_text_repel(aes(x = PC1, y = PC2, label = ind, color = pop), nudge_y = -.05) +
+  xlab(paste0("PC1 - ", sprintf("%.1f%%", pca$eig[1]))) + 
+  ylab(paste0("PC2 - ", sprintf("%.1f%%", pca$eig[2]))) +
+  scale_color_hue(l = 50)
+  # scale_color_viridis_d(option = "A")
+```
+
+<!-- --- -->
+
+```{r pca13, fig.width=8, fig.height=4, fig.align='center', warning=FALSE, eval=FALSE, echo=FALSE}
+ggplot(pca$scores) +
+  geom_point(aes(x = PC1, y = PC3, color = pop), size = 1.5) + 
+  geom_text_repel(aes(x = PC1, y = PC3, label = ind, color = pop), nudge_y = -.05) +
+  xlab(paste0("PC1 - ", sprintf("%.1f%%", pca$eig[1]))) + 
+  ylab(paste0("PC3 - ", sprintf("%.1f%%", pca$eig[3]))) +
+  scale_color_hue(l = 50)
+  # scale_color_viridis_d(option = "A")
+```
+
+
+<!-- --- -->
+
+<!-- ### SNMF -->
+
+```{r, eval=FALSE, echo=FALSE}
+snmf_dir <- "snmf"
+dir.create(snmf_dir, showWarnings = F)
+kasp_geno_file <- file.path(snmf_dir, "kasp_8k.geno")
+write.geno(as.matrix(kaspSNPs_gl), kasp_geno_file)
+```
+
+```{r snmf_fake, eval=FALSE, echo=FALSE}
+kasp_snmf <- snmf(kasp_geno_file, K = 1:10, repetitions = 10, CPU = 20, entropy = T, seed = 987654321, project = "new")
+plot(kasp_snmf)
+```
+
+```{r snmf, fig.align="center", fig.height=5, fig.width=7, eval=FALSE, echo=FALSE}
+kasp_snmf <- LEA::load.snmfProject("snmf/kasp_8k.snmfProject")
+plot(kasp_snmf)
+```
+
+
+
+<!-- - k = 5 -->
+<!-- - run: min entropy -->
+
+```{r snmf_k5, echo=FALSE, fig.width=9, fig.height=6, fig.align='center', eval=FALSE}
+k <- 5
+prop <- Q(kasp_snmf, K = k, run = which.min(cross.entropy(kasp_snmf, K = k))) %>% as.data.frame()
+colnames(prop) <- c("C", "AG", "D", "ER", "OB")
+prop$id <- paste(indNames(kaspSNPs_gi), pop(kaspSNPs_gi), sep = "_")
+ind_order <- LEA::barchart(kasp_snmf, K = k, run = which.min(cross.entropy(kasp_snmf, K = k)), plot = F)
+prop <- prop[ind_order$order,]
+prop <- reshape2::melt(prop, variable.name = "ancestry", value.name = "proportion")
+prop$id <- factor(prop$id, levels = unique(prop$id), ordered = F)
+prop$ancestry <- factor(prop$ancestry, levels = c("ER", "OB", "C", "D", "AG"))
+prop$n_snps <- "5255"
+ancestry_prop$n_snps <- "1.2M"
+ggplot(rbind(ancestry_prop %>% dplyr::select(-pop), prop)) +
+  facet_wrap(vars(n_snps), ncol = 1, labeller = "label_both") +
+  geom_col(aes(x = id, y = proportion, fill = ancestry), position = position_stack()) + 
+  scale_fill_viridis_d(end = .9) +
+  theme(axis.text.x = element_text(angle = 90, h = 1, v = .5),
+        panel.background = element_rect(fill = "white"), panel.grid = element_line(color = "gray", size = .1)) +
+  xlab("individuals") +
+  ylab("ancestry proportion") 
+
+```
+
+
+
+<!-- Correlation between snmf results of 5255 SNPs and 1.2M SNPs: -->
+```{r correlation, eval=FALSE, include=FALSE}
+v1 <- acast(ancestry_prop, id ~ ancestry, value.var = "proportion")
+v1 <- v1[order(rownames(v1)), order(colnames(v1))]
+v2 <- acast(prop, id ~ ancestry, value.var = "proportion")
+v2 <- v2[order(rownames(v2)), order(colnames(v2))]
+cor(c(v1[,-1]), c(v2[,-1]), method = "pearson")^2
+```
+
+
+---
+
+<p, ul style="font-size:200%;">
+
+# Combine genotypes of resequencing data and 5k array genotypes  
+
+1. Get genotypes from resequencing data:  
+  - map the snp locations
+  - get information of morphism, missing data, quality, ...
+2. Convert 5k array genotypes (1,2,3) to geno format (0,1,2)  
+  - 0 if 0 ALT - 2 REF
+  - 1 if 1 ALT - 1 REF
+  - 2 if 2 ALT - 0 REF
+3. Merge 2 data sets and filter snps
+
+</p, ul>
+
+---
+
+# Get genotypes at 5575 SNPs from resequencing data  
+  - resequencing data: 65 individuals, 11M biallelic SNPs, quality filtered
+  - map 5575 SNPs to the reference new genome
+```{r canephora_array, echo=FALSE, warning=FALSE, message=FALSE}
+can_array_file <- "./snp_panels/canephora-array-genotypes.xlsx"
+can_array <- read_excel(can_array_file, sheet = "119-genotypes-5575-SNP")
+can_array <- can_array %>% column_to_rownames("Name")
+snp_old_pos <- t(can_array[c("Chr", "Position"),])
+snp_old_pos[snp_old_pos == "UN_RANDOM"] <- "0"
+snp_old_pos <- as.data.frame(na.omit(snp_old_pos))
+snp_old_pos$old_location <- paste0("Chr", snp_old_pos$Chr, "_", snp_old_pos$Position)
+snp_old_pos %<>% rownames_to_column("new_ID")
+```
+
+```{r map_canephora_array, echo=FALSE}
+# information of snp position mapped on old and new ref genome
+snps_info$old_location <- paste(snps_info$Chr, snps_info$Genome.Location, sep = "_")
+snps_info$old_location <- gsub("chr", "Chr", snps_info$old_location, fixed = T)
+# map the snp ID
+can_snpsID <- snps_info %>% filter(old_location %in% snp_old_pos$old_location)
+# snps_info %>% filter(location %in% snp_old_pos$snp_ID) 
+# snp_old_pos %>% filter(snp_ID %in% x$location) %>% nrow()
+cat("Number of SNPs having duplicated position:", snp_old_pos[duplicated(snp_old_pos$old_location),] %>% nrow, "\n")
+snp_old_pos %>% filter(old_location %in% snp_old_pos$old_location[duplicated(snp_old_pos$old_location)]) %>% dplyr::select(-old_location)
+# nrow(can_snpsID)
+
+# map the snps on the new genome
+can_snps <- mapped_snps %>% filter(snp_ID %in% can_snpsID$Name)
+cat("Number of SNPs mapped on new genome:", can_snpsID %>% filter(Name %in% can_snps$snp_ID) %>% nrow(), "out of", nrow(snp_old_pos), "\n")
+# write.table(can_snps %>% dplyr::select(mapped_chr, snp_pos), "./snp_panels/canephora_array_snps.tsv", sep = "\t", row.names = F, col.names = F, quote = F)
+```
+
+
+  - get genotypes from resequencing data
+```{bash vcf_canephora_array, eval=FALSE, echo=FALSE}
+/usr/itrop/vcftools-0.1.16/bin/vcftools \
+--vcf /data3/projects/vietcaf/baotram/vietcaf_general_DP_missing_indv_singletons_Filtered_biallelic.recode.vcf \
+--positions snp_panels/canephora_array_snps.tsv \
+--out ref_genotypes/vietcaf_final_canephora_array_SNPs \
+--recode 
+
+/usr/itrop/vcftools-0.1.16/bin/vcftools \
+--gzvcf /data3/projects/vietcaf/vcf/vietcaf_AllGtypes_Allchr_FINAL_RAW.vcf.gz \
+--positions snp_panels/canephora_array_snps.tsv \
+--out ref_genotypes/vietcaf_final_canephora_array_SNPs_unfiltered \
+--recode 
+
+
+/usr/itrop/vcftools-0.1.16/bin/vcftools \
+--vcf /data3/projects/vietcaf/baotram/vietcaf_general_DP_missing_indv_singletons_Filtered.recode.vcf \
+--positions snp_panels/canephora_array_snps.tsv \
+--out ref_genotypes/vietcaf_final_canephora_array_SNPs_monomorphic \
+--recode 
+```
+
+```{r, include=FALSE}
+nInd_vcf <- function(vcf_file) {
+  vcfR <- read.vcfR(vcf_file, verbose = F)
+  nind <- vcfR::nrow(vcfR)
+  return(nind)
+}
+```
+
+
+```{r read_geno_can_array, echo=FALSE}
+vietcaf_vcf_file <- "./ref_genotypes/vietcaf_final_canephora_array_SNPs_monomorphic.recode.vcf"
+vietcaf_vcfR <- read.vcfR(vietcaf_vcf_file, verbose = F)
+vietcaf_snps <- vietcaf_vcfR %>% getFIX() %>% as.data.frame()
+
+cat("Number of biallelic+monomorphic sites in resequencing data:", nrow(vietcaf_snps), "out of", can_snpsID %>% filter(Name %in% can_snps$snp_ID) %>% nrow())
+cat("Number of biallelic sites in resequencing data:", nInd_vcf("ref_genotypes/vietcaf_final_canephora_array_SNPs.recode.vcf"))
+cat("Number of polymorphic+unfilterd sites in resequencing data:", nInd_vcf("ref_genotypes/vietcaf_final_canephora_array_SNPs_unfiltered.recode.vcf"))
+```
+
+---
+
+# Convert 5k array genotypes (1,2,3) to geno format (0,1,2)
+```{r rename canephora_snp_ID, echo=FALSE}
+vietcaf_snps <- merge(vietcaf_snps, can_snps, by.x = c("CHROM", "POS"), by.y = c("mapped_chr", "snp_pos"))
+vietcaf_snps <- merge(vietcaf_snps, snps_info[c("Name", "old_location")], by.x = "snp_ID", by.y = "Name")
+vietcaf_snps <- merge(vietcaf_snps, snp_old_pos, by = "old_location")
+vietcaf_snps %<>% mutate(ID = paste(CHROM, POS, sep = "_"))
+```
+
+  - The reference genome (HD-200-094) should have all homozygous loci (1 or 3).  
+However ...
+```{r ref_problem, echo=FALSE}
+can_array_geno <- can_array[6:nrow(can_array),]
+can_array_geno <- can_array_geno[colnames(can_array_geno) %in% vietcaf_snps$new_ID] 
+colnames(can_array_geno) <- sapply(colnames(can_array_geno), function(i) vietcaf_snps$ID[vietcaf_snps$new_ID == i], 
+                                   simplify = T, USE.NAMES = F)
+can_array_geno <- can_array_geno[!duplicated(colnames(can_array_geno))]
+
+ref <- "HD-200-094"
+cat("Number of heterozygous loci of the reference", ref, "is", length(colnames(can_array_geno)[can_array_geno[ref,] == 2]), "\n")
+cat("The heterozygous loci are:\n")
+hete_loci <- colnames(can_array_geno)[can_array_geno[ref,] == 2]
+print(hete_loci)
+cat("Number of homozygous genotypes:", length(rownames(can_array_geno)[apply(can_array_geno, 1, function(i) all(i != 2))]), "\n")
+```
+
+  - So I remove the heterozygous loci before converting the genotypes
+
+```{r convert_can_geno, echo=FALSE}
+cat("Number of remained SNPs:", ncol(can_array_geno[, !can_array_geno[ref,] == 2]))
+# colnames(can_array_geno)[apply(can_array_geno, 2, function(i) length(unique(i)) == 1)]
+filt_can_array_geno <- can_array_geno[, can_array_geno[ref,] != 2]
+filt_can_array_geno[filt_can_array_geno == 0] <- NA
+conv_can_array_geno <- apply(filt_can_array_geno, 2, function(g) {
+  ng <- abs(as.numeric(g)-as.numeric(g[ref]))
+  ng[ng == 0] <- "0/0"
+  ng[ng == 1] <- "0/1"
+  ng[ng == 2] <- "1/1"
+  ng[is.na(ng)] <- "NA"
+  return(ng)
+  })
+
+rownames(conv_can_array_geno) <- rownames(filt_can_array_geno)
+colnames(conv_can_array_geno) <- colnames(filt_can_array_geno)
+```
+
+```{r merge_genotypes, echo=FALSE}
+# vietcaf_geno <- as.matrix(vcfR2genlight(vietcaf_vcfR))
+vietcaf_geno <- t(extract.gt(vietcaf_vcfR, as.numeric = F, return.alleles = F))
+vietcaf_geno <- vietcaf_geno[, !colnames(vietcaf_geno) %in% hete_loci]
+all_geno <- rbind(vietcaf_geno[,colnames(conv_can_array_geno)], conv_can_array_geno)
+```
+
+```{r duplicated_genotypes, echo=FALSE, eval=FALSE}
+dup_gt <- rownames(all_geno)[duplicated(all_geno)]
+all_geno[apply(all_geno, 1, function(t) all(t == all_geno[dup_gt,])),]
+```
+
+```{r get_pop_info, echo=FALSE, cache=FALSE}
+# genind object for all genotypes
+colnames(all_geno) <- gsub(".", "_", colnames(all_geno), fixed = T)
+all_geno[is.na(all_geno)] <- "NA"
+all_genind <- df2genind(all_geno, sep = "/", type = "codom", ncode = 1, ploidy = 2, NA.char = "NA")
+# get vietcaf pop
+ancestry_prop <- readRDS("/data3/projects/vietcaf/baotram/scripts/robusta_vn/test_10_clones/snmf_random_10perc_SNPs/allsnmf_proportion.Rds")
+ancestry_prop %<>% 
+  group_by(id) %>% mutate(pop = ancestry[which.max(proportion)]) %>% 
+  mutate(pop = ifelse(max(proportion) < 0.8,  "admixed", as.character(unique(pop)))) %>% 
+  distinct(id, ancestry, .keep_all = T)
+ancestry_prop$id <- gsub("\\_.+", "", ancestry_prop$id)
+all_pop <- ancestry_prop[c("id", "pop")]
+all_pop %<>% distinct()
+# get "canephora array" pop
+can_array_passport <- read_excel(can_array_file, "passport")
+can_array_passport %<>% filter(Génotype %in% rownames(conv_can_array_geno)) 
+can_array_passport %<>% 
+  rowwise() %>% 
+  filter(!(Génotype == "BGQ23" && is.na(`Other Code`))) %>% 
+  distinct(Génotype, .keep_all = T) %>% 
+  dplyr::select(Génotype, `Genetic Group`) %>% 
+  rename(id = Génotype, pop = `Genetic Group`)
+can_array_pop <- merge(can_array_passport, data.frame(id = rownames(conv_can_array_geno)), by = "id", all.y = T)
+# create pop for genind object
+# can_array_passport %<>% filter(id %in% rownames(conv_can_array_geno)) #
+all_pop <- rbind(data.frame(all_pop, source = "sequencing"), 
+                 data.frame(can_array_pop, source = "array"))
+all_genind <- all_genind[all_pop$id,]
+all_pop$pop[is.na(all_pop$pop)] <- "NA"
+pop(all_genind) <- all_pop$pop
+strata(all_genind) <- data.frame(source = all_pop$source)
+all_ref_genind <- all_genind[grep("TR\\d+m", indNames(all_genind), invert = T),]
+```
+
+```{r genotype_problem, echo=FALSE}
+# some warnings
+cat("Number of total individuals (VN excluded):", nInd(all_genind), "\n")
+cat("Genotypes that are not included in the passport table:\n")
+can_array_pop$id[!can_array_pop$id %in% can_array_passport$id]
+```
+
+  - Summary of populations (previously classified separately from the 2 data sets)
+```{r summary_pop, echo=FALSE}
+table(all_ref_genind$pop)
+```
+
+---
+
+
+# Filter and select SNPs
+
+<p, ul style="font-size:200%;">
+1. Filter out SNPs having missing data > 5%, and genotypes having more than 5% missing SNPs  
+2. Filter SNPs with MAF < 0.05  
+3. Run SNMF, K = 1:10, discrimination power
+4. New tree (euclidean distance), compare with SNMF results
+5. Location on CDS or not
+</p, ul>
+
+---
+
+## Missing data
+```{r missing, echo=FALSE}
+# missing <- info_table(all_ref_genind, plot = F, low = "white", high = "red", percent = T, returnplot = T, plotlab = F)
+# missing["Total",][missing["Total",] > .05]
+
+# missing data
+all_ref_genind <- missingno(all_ref_genind, type = "loci", cutoff = 0.05, quiet = F, freq = FALSE)
+cat("Number of SNPs remained:", nLoc(all_ref_genind))
+all_ref_genind <- missingno(all_ref_genind, type = "geno", quiet = F, freq = FALSE)
+cat("Number of SNPs remained:", nLoc(all_ref_genind))
+```
+
+---
+
+## MAF
+```{r maf_message, echo=FALSE, message=FALSE, warning=FALSE, results=FALSE}
+# maf
+message_maf <- capture.output(informloci(all_ref_genind, MAF = .05), type = "message")
+```
+
+
+```{r maf, echo=FALSE, message=FALSE, warning=FALSE}
+cat(paste(message_maf[1:7], "...", collapse = "\n"))
+all_ref_genind <- informloci(all_ref_genind, MAF = .05)
+cat("Number of SNPs remained:", nLoc(all_ref_genind))
+# maf <- minorAllele(all_ref_genind)
+# maf[maf < .05] %>% length()
+```
+
+
+---
+
+Check the genotypes of some common individual present in both data sets by converted genotype
+```{r snmf_geno, include=FALSE,}
+all_snmf_geno <- apply(all_geno, 1:2, function(g) {
+  all <- unlist(strsplit(g, "/", fixed = T))
+  fg <- sum(as.numeric(all))
+  return(fg)
+})
+snmf_geno <- all_snmf_geno[indNames(all_ref_genind), locNames(all_ref_genind)]
+```
+
+
+```{r check_geno}
+can_array_passport <- read_excel(can_array_file, "passport")
+can_array_passport %<>% filter(Génotype %in% rownames(conv_can_array_geno)) 
+array_other_codes <- can_array_passport %>% filter(!`Other Code` %in% c("-", NA))
+dup_inds <- do.call(rbind, sapply(1:nrow(array_other_codes), function(n) {
+  s <- grep(array_other_codes$`Other Code`[n], rownames(vietcaf_geno), value = T)
+  if (length(s) == 0) return(NULL)
+  a <- array_other_codes$Génotype[n]
+  df <- data.frame("array_id" = a, "seq_id" = s)
+  return(df)
+  }, simplify = F))
+
+snmf_geno[c(dup_inds$array_id[1], dup_inds$seq_id[1]),1:5]
+
+dif <- sapply(1:nrow(dup_inds), function(i) {
+  snmf_geno[dup_inds$array_id[i],][!snmf_geno[dup_inds$array_id[i],] == snmf_geno[dup_inds$seq_id[i],]] %>% length()
+})
+
+cbind(dup_inds, "difference" = dif)
+```
+
+So the genotype converting is correct and the genotyping was good :)
+
+---
+
+## snp density
+
+```{r snp_dis, results=FALSE, warning=FALSE, message=FALSE, fig.height=8, fig.width=15, eval=TRUE, echo=FALSE}
+# genome
+genome_fa <- "/data3/projects/vietcaf/reference/CC1.8_v2_pseudomolecule_cat.fa"
+genome <- scanFa(genome_fa)
+genome <- genome[grepl("Chr", names(genome))] # remove contigs
+names(genome) <- gsub(" .+", "", names(genome))
+genome_GR <- GRanges(seqnames = names(genome), ranges = IRanges(start = 1, end = width(genome)))
+
+# snps
+filtered_snps <- vietcaf_snps %>% 
+  filter(ID %in% gsub("CC1_8_", "CC1.8.", colnames(snmf_geno))) %>% 
+  distinct(CHROM, POS, .keep_all = T)
+filtSNP_GR <- GRanges(seqnames = filtered_snps$CHROM, ranges = IRanges(filtered_snps$POS))
+snp_perCh <- filtered_snps %>% group_by(CHROM) %>% summarise(n = n())
+
+
+gkp <- plotKaryotype(genome = genome_GR, plot.type = 6) 
+kpDataBackground(gkp, data.panel ="ideogram", color = "gray10")
+kpAddBaseNumbers(gkp, tick.dist = 1e7)
+kpPlotRegions(gkp, data = filtSNP_GR, data.panel = "ideogram", col = "darkred", avoid.overlapping = T)
+kpAddMainTitle(gkp, "Distribution of the 4202 filtered SNPs")
+kpAddChromosomeNames(gkp, paste(snp_perCh$n, "snps"), yoffset = -20)
+```
+
+---
+
+```{r snps_density, echo=FALSE, fig.height=2.5, fig.width=5, warning=FALSE, message=FALSE}
+filtered_snps <- filtered_snps %>% group_by(CHROM) %>% arrange(POS, .by_group = T)
+filtered_snps %>% group_by(CHROM) %>% summarise(mean_distance = sprintf("%.2f", mean(diff(sort(as.numeric(POS))))), nb_snps = n())
+all_snp_dis <- filtered_snps %>% group_by(CHROM) %>% summarise(distance = as.numeric(sprintf("%.2f", diff(sort(as.numeric(POS)))))) %>% dplyr::select(distance)
+
+ggplot(all_snp_dis) +
+  geom_histogram(aes(x = as.numeric(distance)), binwidth = 1e4)
+
+cat("Summary of the distances:\n")
+summary(all_snp_dis$distance)
+
+cat("Number of SNPs on ChrUn in the old genome:", length(grep("chrUn", filtered_snps$new_ID)))
+```
+
+---
+
+# Filter SNPs by distance
+
+## Remove SNPs that are 40kb close to each other
+
+```{r filter_snps_file, echo=FALSE, eval=FALSE}
+filtered_snps_file <- "snp_panels/missing_maf_filtered_SNPs.tsv"
+write.table(filtered_snps %>% dplyr::select(CHROM, POS) %>% dplyr::select(CHROM, POS), filtered_snps_file, sep = "\t", row.names = F, col.names = F, quote = F)
+```
+
+```{bash, eval=FALSE}
+/usr/itrop/vcftools-0.1.16/bin/vcftools \
+--vcf ref_genotypes/vietcaf_final_canephora_array_SNPs_monomorphic.recode.vcf \
+--positions snp_panels/missing_maf_filtered_SNPs.tsv \
+--out ref_genotypes/vietcaf_final_canephora_SNPs_missing_maf_filtered_40kb_thin \
+--thin 40000 \
+--recode 
+```
+
+```{r thin_vcf, echo=FALSE}
+thin_vcf_file <- "ref_genotypes/vietcaf_final_canephora_SNPs_missing_maf_filtered_40kb_thin.recode.vcf"
+thin_vcfR <- read.vcfR(thin_vcf_file, verbose = F)
+cat("Number of SNPs remained:", nrow(thin_vcfR))
+```
+
+---
+
+## Distribution of SNPs remained after the filtering
+
+```{r thin_snps_dis, results=FALSE, warning=FALSE, message=FALSE, fig.height=8, fig.width=15, eval=TRUE, echo=FALSE}
+thin_snps <- as.data.frame(getFIX(thin_vcfR))
+thinSNP_GR <- GRanges(seqnames = thin_snps$CHROM, ranges = IRanges(thin_snps$POS))
+thin_snp_perCh <- thin_snps %>% group_by(CHROM) %>% summarise(n = n())
+
+gkp3 <- plotKaryotype(genome = genome_GR, plot.type = 6) 
+kpDataBackground(gkp3, data.panel ="ideogram", color = "gray10")
+kpAddBaseNumbers(gkp3, tick.dist = 1e7)
+kpPlotRegions(gkp3, data = thinSNP_GR, data.panel = "ideogram", col = "darkred", avoid.overlapping = T)
+kpAddMainTitle(gkp3, paste("Distribution of the", nrow(thin_vcfR), "filtered SNPs"))
+kpAddChromosomeNames(gkp3, paste(thin_snp_perCh$n, "snps"), yoffset = -20)
+```
+
+---
+
+```{r thin_snps_density, echo=FALSE, fig.height=2.5, fig.width=5, warning=FALSE, message=FALSE}
+thin_snps <- thin_snps %>% group_by(CHROM) %>% arrange(POS, .by_group = T)
+thin_snps %>% group_by(CHROM) %>% summarise(mean_distance = sprintf("%.2f", mean(diff(sort(as.numeric(POS))))), nb_snps = n())
+thin_snp_dis <- thin_snps %>% group_by(CHROM) %>% summarise(distance = as.numeric(sprintf("%.2f", diff(sort(as.numeric(POS)))))) %>% dplyr::select(distance)
+
+ggplot(thin_snp_dis) +
+  geom_histogram(aes(x = as.numeric(distance)), binwidth = 1e4)
+
+cat("Summary of the distances:\n")
+summary(thin_snp_dis$distance)
+```
+
+---
+
+# Evaluate the final 3k SNPs
+
+
+## SNMF
+```{r, include=FALSE}
+thin_snmf_geno <- snmf_geno[, paste(gsub("\\.", "_", thin_snps$CHROM), thin_snps$POS, sep = "_")]
+thin_geno_file <- file.path(snmf_dir, "thin_snps.geno")
+write.geno(thin_snmf_geno, thin_geno_file)
+```
+
+```{r test_snmf, fig.height=4, fig.width=6,results=FALSE, warning=FALSE, message=FALSE, fig.align="center"}
+thin_snmf <- snmf(thin_geno_file, K = 1:10, repetitions = 10, CPU = 20, entropy = T, seed = 987654321, project = "new")
+plot(thin_snmf)
+```
+
+---
+
+```{r plot_snmf, fig.height=7, fig.width=12, echo=FALSE}
+get_Q <- function(snmf_object, k, id = NA, plot = TRUE, color = scale_fill_viridis_d(end = .9), legend = F) {
+  ind_order <- LEA::barchart(snmf_object, K = k, run = which.min(cross.entropy(snmf_object, K = k)), plot = F)
+  q <- LEA::Q(snmf_object, K = k, run = which.min(cross.entropy(snmf_object, K = k)))
+  q <- data.frame(q, id = id)
+  q <- reshape2::melt(q, id.vars = "id", value.name = "proportion", variable.name = "ancestry")
+  q$id <- factor(q$id, levels = q$id[ind_order$order])
+  if (plot == TRUE) {
+    p <- ggplot(q) +
+      geom_col(aes(x = id, y = proportion, fill = ancestry), position = position_stack(), width = 1, show.legend = legend) + 
+      # scale_fill_viridis_d(end = .9) +
+      # scale_fill_discrete(l = 50) +
+      color +
+      theme(axis.text.x = element_text(angle = 90, h = 1, v = .5),
+            panel.background = element_rect(fill = "white"), panel.grid = element_line(color = "gray", size = .1)) +
+      xlab("individuals") +
+      ylab("ancestry proportion")
+    print(p)
+  }
+  return(invisible(q))
+}
+
+q2 <- get_Q(thin_snmf, k = 2, id = paste(indNames(all_ref_genind), pop(all_ref_genind), sep = "_"), plot = F)
+q3 <- get_Q(thin_snmf, k = 3, id = paste(indNames(all_ref_genind), pop(all_ref_genind), sep = "_"), plot = F)
+q4 <- get_Q(thin_snmf, k = 4, id = paste(indNames(all_ref_genind), pop(all_ref_genind), sep = "_"), plot = F)
+q5 <- get_Q(thin_snmf, k = 5, id = paste(indNames(all_ref_genind), pop(all_ref_genind), sep = "_"), plot = F)
+q6 <- get_Q(thin_snmf, k = 6, id = paste(indNames(all_ref_genind), pop(all_ref_genind), sep = "_"), plot = F)
+q7 <- get_Q(thin_snmf, k = 7, id = paste(indNames(all_ref_genind), pop(all_ref_genind), sep = "_"), plot = F)
+q8 <- get_Q(thin_snmf, k = 8, id = paste(indNames(all_ref_genind), pop(all_ref_genind), sep = "_"), plot = F)
+```
+
+
+
+```{r plot_snmf_1, fig.height=7, fig.width=12, echo=FALSE}
+q_2_5 <- rbind(data.frame(q2, K = 2),
+           data.frame(q3, K = 3),
+           data.frame(q4, K = 4),
+           data.frame(q5, K = 5))
+ggplot(q_2_5) +
+  facet_wrap(vars(K), ncol = 1, labeller = label_both) +
+  geom_col(aes(x = id, y = proportion, fill = ancestry), position = position_stack(), width = 1, show.legend = F) + 
+  # scale_fill_discrete(l = 50) +
+  scale_fill_viridis_d(option = "B") + 
+  theme(axis.text.x = element_text(angle = 90, h = 1, v = .5, size = 6),
+        panel.background = element_rect(fill = "white"), 
+        panel.grid = element_line(color = "gray", size = .1)) +
+  xlab("individuals") +
+  ylab("ancestry proportion")
+```
+
+
+---
+
+```{r plot_snmf_2, fig.height=7, fig.width=12, echo=FALSE}
+q_5_8 <- rbind(data.frame(q5, K = 5),
+           data.frame(q6, K = 6),
+           data.frame(q7, K = 7),
+           data.frame(q8, K = 8))
+ggplot(q_5_8) +
+  facet_wrap(vars(K), ncol = 1, labeller = label_both) +
+  geom_col(aes(x = id, y = proportion, fill = ancestry), position = position_stack(), width = 1, show.legend = F) + 
+  # scale_fill_discrete(l = 50) +
+  scale_fill_viridis_d(option = "B") + 
+  theme(axis.text.x = element_text(angle = 90, h = 1, v = .5, size = 6),
+        panel.background = element_rect(fill = "white"), 
+        panel.grid = element_line(color = "gray", size = .1)) +
+  xlab("individuals") +
+  ylab("ancestry proportion")
+```
+
+---
+
+## Compare with the SNMF of whole-genome SNPs of the resequenced individuals
+
+```{r snmf_seq_input, include=FALSE}
+thin_snmf_geno_seq <- all_snmf_geno[rownames(vietcaf_geno), paste(gsub("\\.", "_", thin_snps$CHROM), thin_snps$POS, sep = "_")]
+thin_geno_seq_file <- file.path(snmf_dir, "thin_snps_seq_inds.geno")
+write.geno(thin_snmf_geno_seq, thin_geno_seq_file)
+```
+
+```{r snmf_seq, include=FALSE, message=FALSE, warning=FALSE, results=FALSE, fig.show=FALSE, echo=FALSE}
+thin_seq_snmf <- snmf(thin_geno_seq_file, K = 1:10, repetitions = 10, CPU = 20, entropy = T, seed = 987654321, project = "new")
+plot(thin_seq_snmf)
+```
+
+```{r snmf_compare, echo=FALSE, fig.width=7, fig.height=5, fig.align='center'}
+seq_all_prop <- readRDS("/data3/projects/vietcaf/baotram/scripts/robusta_vn/test_10_clones/snmf_random_10perc_SNPs/allsnmf_proportion.Rds")
+# seq_geno <- all_geno[rownames(thin_snmf_geno_seq), paste(gsub("\\.", "_", thin_snps$CHROM), thin_snps$POS, sep = "_")]
+# seq_genind <- df2genind(seq_geno, sep = "/", type = "codom", ncode = 1, ploidy = 2, NA.char = "NA")
+seq_genind <- all_genind[rownames(thin_snmf_geno_seq), loc = colnames(thin_snmf_geno_seq)]
+seq_thin_prop <- get_Q(thin_seq_snmf, k = 5, id = paste(indNames(seq_genind), 
+                                       pop(seq_genind), sep = "_"), plot = F)
+seq_thin_prop$id <- sapply(seq_thin_prop$id, function(id) {
+  unique(seq_all_prop$id[grep(gsub("_.+", "", id), seq_all_prop$id)])
+})
+levels(seq_thin_prop$ancestry) <- c("OB", "C", "D", "AG", "ER")
+
+
+seq_snmf_comp <- rbind(data.frame(seq_thin_prop, snp = "3k filtered SNPs"),
+                       data.frame(seq_all_prop %>% dplyr::select(-pop), snp = "whole-genome SNPS (1.2M)"))
+ggplot(seq_snmf_comp) +
+  facet_wrap(facets = vars(snp), ncol = 1) +
+  geom_col(aes(x = id, y = proportion, fill = ancestry), position = position_stack(), width = 1, show.legend = F) + 
+  # scale_fill_discrete(l = 50) +
+  scale_fill_viridis_d(option = "B") + 
+  theme(axis.text.x = element_text(angle = 90, h = 1, v = .5, size = 6),
+        panel.background = element_rect(fill = "white"), 
+        panel.grid = element_line(color = "gray", size = .1)) +
+  xlab("individuals") +
+  ylab("ancestry proportion")
+```
+
+
+```{r seq_snmf_correlation, echo=FALSE, message=FALSE, warning=FALSE}
+seq_snmf_comp_cast <- dcast(seq_snmf_comp, id+ancestry~snp, value.var = "proportion") %>% 
+  rename("filtered_3k_snps" = "3k filtered SNPs", "whole_snps" = "whole-genome SNPS (1.2M)")
+seq_snmf_comp_cast %>% group_by(ancestry) %>% summarise(RMSE = rmse(whole_snps, filtered_3k_snps)) %>% dplyr::select(RMSE) %>% colMeans()
+seq_snmf_comp_cast %>% group_by(ancestry) %>% summarise(correlation = cor(whole_snps, filtered_3k_snps)) %>% dplyr::select(correlation) %>% colMeans()
+```
+
+---
+
+## Compare the phylo trees of the array genotypes
+
+```{r den_fun, include=FALSE}
+dendro_data_k <- function(hc, k) {
+  
+  hcdata    <-  ggdendro::dendro_data(hc, type = "rectangle")
+  seg       <-  hcdata$segments
+  labclust  <-  cutree(hc, k)[hc$order]
+  segclust  <-  rep(0L, nrow(seg))
+  heights   <-  sort(hc$height, decreasing = TRUE)
+  height    <-  mean(c(heights[k], heights[k - 1L]), na.rm = TRUE)
+  
+  for (i in 1:k) {
+    xi      <-  hcdata$labels$x[labclust == i]
+    idx1    <-  seg$x    >= min(xi) & seg$x    <= max(xi)
+    idx2    <-  seg$xend >= min(xi) & seg$xend <= max(xi)
+    idx3    <-  seg$yend < height
+    idx     <-  idx1 & idx2 & idx3
+    segclust[idx] <- i
+  }
+  
+  idx                    <-  which(segclust == 0L)
+  segclust[idx]          <-  segclust[idx + 1L]
+  hcdata$segments$clust  <-  as.factor(segclust)
+  hcdata$segments$line   <-  as.integer(segclust < 1L)
+  hcdata$labels$clust    <-  as.factor(labclust)
+  
+  hcdata
+}
+```
+
+```{r array_den, include=FALSE}
+array_genind <- all_genind[strata(all_genind) == "array", loc = colnames(thin_snmf_geno_seq)]
+array_dist <- dist(array_genind)
+array_dendro <- dendro_data_k(hc = hclust(array_dist), k = 7)
+array_dendro$labels$label <- sapply(array_dendro$labels$label, function(n) paste(n, pop(array_genind[n]), sep = "_"))
+array_plot <- ggplot() +
+  geom_segment(data = array_dendro$segments,
+               aes(x = x, y = y, xend =  xend, yend =  yend, color =  clust),
+               lineend =  "round", show.legend = F) +
+  geom_text(data = array_dendro$labels, 
+            aes(x = x, y = y, label= label, color = clust),
+            angle = 90, hjust = 1, nudge_y = -2, size = 2, show.legend = F) +
+  scale_color_viridis_d(option = "B", end = .9, breaks = 1:nlevels(array_dendro$segments$clust)) +
+  geom_text(aes(x=0,y=0, label="Filtered 3k SNPs", angle = 90, hjust = 0, vjust = 0)) +
+  expand_limits(y = -25) +
+  scale_y_continuous(breaks = seq(0, 150, 50)) +
+  theme(panel.background = element_blank(),
+        # axis.line.y.left = element_line(colour = "grey"),
+        axis.text.x = element_blank(), axis.title = element_blank(), axis.ticks.x = element_blank())
+```
+
+```{r all_array_den, include=FALSE}
+all_array_geno <- can_array %>% dplyr::select(starts_with("C", ignore.case = T)) 
+all_array_geno <- all_array_geno[rownames(all_array_geno) %in% rownames(conv_can_array_geno),] 
+all_array_geno[all_array_geno == 0] <- NA
+conv_all_array_geno <- apply(all_array_geno, 2, function(g) {
+  ng <- abs(as.numeric(g)-as.numeric(g[ref]))
+  ng[ng == 0] <- "0/0"
+  ng[ng == 1] <- "0/1"
+  ng[ng == 2] <- "1/1"
+  ng[is.na(ng)] <- "NA"
+  return(ng)
+  })
+
+rownames(conv_all_array_geno) <- rownames(all_array_geno)
+colnames(conv_all_array_geno) <- colnames(all_array_geno)
+
+all_array_genind <- df2genind(conv_all_array_geno, sep = "/", type = "codom", ncode = 2, ploidy = 2, NA.char = "NA")
+pop(all_array_genind) <- pop(array_genind[indNames(all_array_genind)])
+
+all_array_dist <- dist(all_array_genind)
+all_array_dendro <- dendro_data_k(hc = hclust(all_array_dist), k = 7)
+all_array_dendro$segments$clust <- factor(all_array_dendro$segments$clust, levels = c(0,2,3,4,1,7,5,6))
+all_array_dendro$labels$clust <- factor(all_array_dendro$labels$clust, levels = c(2,3,4,1,7,5,6))
+all_array_dendro$labels$label <- sapply(all_array_dendro$labels$label, function(n) paste(n, pop(all_array_genind[n]), sep = "_"))
+all_array_plot <- ggplot() +
+  geom_segment(data = all_array_dendro$segments,
+               aes(x =  x, y = y, xend =  xend, yend =  yend, color = clust),
+               lineend =  "round", show.legend = F) +
+  geom_text(data = all_array_dendro$labels, 
+            aes(x = x, y = y, label= label, color = clust),
+            angle = 90, hjust = 0, nudge_y = 2, size = 2, show.legend = F) +
+  geom_text(aes(x=0,y=0, label="Canephora array (5k SNPs)", angle = 90, hjust = 1, vjust = 0)) +
+  scale_color_viridis_d(option = "B", end = .9, breaks = 1:nlevels(all_array_dendro$segments$clust)) +
+  expand_limits(y = -25) +
+  scale_y_reverse(breaks = seq(0, 150, 50)) +
+  theme(panel.background = element_blank(),
+        # axis.line.y.left = element_line(colour = "grey"),
+        axis.text.x = element_blank(), axis.title = element_blank(), axis.ticks.x = element_blank())
+```
+
+```{r index_den, include=FALSE}
+idx <- data.frame(y1 = 1:nrow(array_dendro$labels),
+                  y2 = match(array_dendro$labels$label, all_array_dendro$labels$label))
+
+idx_plot <- ggplot() +
+  geom_segment(data = idx, 
+               aes(y = 0,
+                   x = y2+.5,
+                   yend = 1,
+                   xend = y1+.5),
+               color    = "grey")  +
+  geom_text(aes(x=0,y=0, label="", angle = 90, hjust = 1, vjust = -1)) +
+  theme(panel.background = element_blank(),
+        # axis.line.y.left = element_line(colour = "grey"),
+        axis.text = element_blank(), axis.title.x = element_blank(), 
+        axis.ticks = element_blank(), axis.title.y = element_text(colour = "white"))
+```
+
+
+```{r compare_dens, echo=FALSE, fig.height=8, fig.width=15, cache=FALSE}
+grid.arrange(array_plot, idx_plot, all_array_plot, heights = c(2,1,2))
+```
+
+
+
+---
+
+# Annotating SNPs
+
+```{r snps_all_info, include=FALSE, eval=FALSE}
+thin_genind <- all_ref_genind[, loc = colnames(thin_snmf_geno_seq)]
+maf_thin <- data.frame(ID = gsub("CC1_8_", "CC1.8.", locNames(thin_genind)), MAF = minorAllele(thin_genind))
+
+final_snps <- vietcaf_snps %>% filter(ID %in% paste(getCHROM(thin_vcfR), getPOS(thin_vcfR), sep = "_")) %>% 
+  distinct(ID, .keep_all = T) %>% 
+  left_join(maf_thin, by = "ID") %>% 
+  rename(can_array = new_ID, old_CHROM = Chr, old_POS = Position, old_ID = snp_ID) 
+final_snps <- merge(final_snps, snps_info[c("Name", "Sequence")], by.x = "old_ID", by.y = "Name", all.y = F) %>% 
+  rename(sequence = Sequence)
+```
+
+```{r}
+ref_gff_file <- "ref_genotypes/CC1.8_v2_named_annotation_0.5_BTI.gff3"
+ref_GR <- import.gff3(ref_gff_file)
+snps_coord <- mergeByOverlaps(thinSNP_GR, ref_GR)
+snps_anno <- snps_coord %>% as.data.frame() %>% mutate(ID = paste(thinSNP_GR.seqnames, thinSNP_GR.start, sep = "_")) %>% 
+  group_by(ID) %>% summarise(annotation = paste(type, collapse = ", ")) %>% 
+  mutate(CDS = grepl("CDS", annotation))
+
+final_snps <- left_join(final_snps, snps_anno, by = "ID")
+final_snps$CDS[is.na(final_snps$CDS)] <- FALSE
+
+cat("Number of annotated SNPs:", nrow(snps_anno), "\n")
+cat("Number of SNPs on CDS:", nrow(final_snps[final_snps$CDS,]))
+```
+
+```{r cds_snps_dis, results=FALSE, warning=FALSE, message=FALSE, fig.height=8, fig.width=15, eval=FALSE, include=FALSE}
+elementMetadata(thinSNP_GR) <- final_snps
+
+gkp4 <- plotKaryotype(genome = genome_GR, plot.type = 6) 
+kpDataBackground(gkp4, data.panel ="ideogram", color = "gray90")
+kpAddBaseNumbers(gkp4, tick.dist = 1e7)
+kpPlotRegions(gkp4, data = thinSNP_GR[mcols(thinSNP_GR)$CDS], data.panel = "ideogram", col = "darkred", avoid.overlapping = T)
+kpPlotRegions(gkp4, data = thinSNP_GR[mcols(thinSNP_GR)$CDS], data.panel = "ideogram", col = "grey10", avoid.overlapping = T)
+kpAddMainTitle(gkp4, paste("Distribution of the", nrow(thin_vcfR), "filtered SNPs"))
+```
+
+
+```{r save_snp_info, include=FALSE, eval=FALSE}
+final_snps <- final_snps %>% 
+  dplyr::select(CHROM, POS, ID, REF, ALT, MAF, annotation, CDS, QUAL, mapped_start, mapped_end, identity, gaps, mismatches, align_length, evalue, old_CHROM, old_POS, old_location, old_ID, can_array, sequence)
+write.table(final_snps, "snp_panels/final_3020_SNPs.tsv", sep = "\t", quote = F, row.names = F)
+```
+
+```{r render, include=FALSE, eval=FALSE}
+rmarkdown::render('/data3/projects/vietcaf/baotram/scripts/robusta_vn/genotyping/genotyping.Rmd', 'xaringan::moon_reader')
+```
+
+```{r}
+webshot("genotyping.html", "genotyping.pdf")
+```

@@ -1,0 +1,265 @@
+---
+title: "Analysis of reference genotypes"
+author: "Tram"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(message = FALSE)
+knitr::opts_chunk$set(warning = FALSE)
+# knitr::opts_chunk$set(cache = TRUE, cache.path = "./R_data/cache/")
+library(DBI)
+library(tidyverse)
+library(adegenet)
+library(LEA)
+library(ggtree)
+library(ape)
+library(writexl)
+```
+
+
+```{r}
+con <- dbConnect(RSQLite::SQLite(), dbname = "./genotyping/seq_kasp_array_genotypes_261SNPs.db")
+vn_info <- dbReadTable(con, "vn_info")
+
+ska_geno <- dbReadTable(con, "genotype")
+ska_geno <- ska_geno %>% column_to_rownames("code")
+geno_info <- dbReadTable(con, "info")
+kasp_info <- dbReadTable(con, "kasp_info")
+all_ref_info <- dbReadTable(con, "ref_info")
+dbDisconnect(con)
+
+# african inds to test
+test_af_code <- kasp_info %>% 
+  filter(grepl("(D|N|J|R)-", Sample.name)) %>% 
+  filter(!Sample.name %in% c(paste0("N-", 44:48), paste0("D-", 9:10))) %>% # out group, paste0("N-", c(6,19,20,22:26,29,31,32,36,37))
+  dplyr::select(code, Sample.name) %>% 
+  mutate(code = paste0(code, "_kasp"))
+
+# reference inds (the same as the ones used for vn analysis)
+ref_code <- geno_info %>% 
+  # filter(initial_ref == TRUE) %>%
+  filter(analysis == "reference") %>%
+  pull(code)
+
+# get the genotype
+af_geno <- ska_geno[c(ref_code, test_af_code$code),]
+# # rename the reference according to unique code
+# rownames(af_geno) <- sapply(rownames(af_geno), function(n) ifelse(n %in% test_af_code$code, test_af_code$Sample.name[test_af_code$code == n], n))
+# 
+# rownames(af_geno) <- sapply(rownames(af_geno), function(n) 
+#   ifelse(n %in% all_ref_info$code, 
+#          gsub("_\\D+", paste0("_", all_ref_info$group[all_ref_info$code == n]), n), 
+#          n))
+
+
+# af_geno <- ska_geno[c(all_ref_info$code, test_af_code$code),]
+rownames(af_geno) <- sapply(rownames(af_geno), function(n) ifelse(n %in% test_af_code$code, test_af_code$Sample.name[test_af_code$code == n], n))
+# # rownames(af_geno) <- sapply(rownames(af_geno), function(n) 
+#   ifelse(n %in% all_ref_info$code, 
+#          gsub("_\\D+", paste0("_", all_ref_info$group[all_ref_info$code == n]), n), 
+#          n))
+
+
+af_info <- left_join(data.frame(code = rownames(af_geno)),
+                 all_ref_info,
+                 # all_ref_info %>% rowwise() %>% mutate(code = gsub("_\\D+", paste0("_", group), code)),
+                 by = "code")
+```
+
+
+```{r pca, results='hide', fig.height=12, fig.width=12}
+af_geno[is.na(af_geno)] <- 9
+lfmm_file <- tempfile(fileext = ".lfmm")
+write.lfmm(af_geno, lfmm_file)
+af_pca <- pca(lfmm_file)
+# remove.pcaProject(ref_pca@pcaProject.file)
+af_pca_proj <- data.frame("code" = rownames(af_geno),
+                          "PC1" = af_pca$projections[,1],
+                          "PC2" = af_pca$projections[,2],
+                          "PC3" = af_pca$projections[,3])
+af_pca_proj <- left_join(af_pca_proj, af_info, by = "code") %>% 
+  mutate(lb = ifelse(is.na(group), code, as.character(group)))
+af_pca_proj <- af_pca_proj %>% mutate(group = factor(group, levels = c("A", "B", "C", "D", "E", "G", "O", "R", "hb", NA)))
+
+eigen <- af_pca$eigenvalues[,1]
+pdf("./genotyping/plots/af_pca_261kasp.pdf")
+ggplot(af_pca_proj) +
+  # geom_point(aes(x = PC1, y = PC2, color = group)) +
+  geom_text(aes(x = PC1, y = PC2, label = lb, color = group), show.legend = F, size = 6) +
+  xlab(paste0("PC1 (", format(eigen[1]/sum(eigen)*100, digits = 2), "%)")) +
+  ylab(paste0("PC2 (", format(eigen[2]/sum(eigen)*100, digits = 2), "%)")) +
+  scale_color_discrete(na.value = "black") +
+  theme_minimal() +
+  theme(axis.title = element_text(size = 15), panel.border = element_rect(color = "gray", fill = NA))
+dev.off()
+
+af_pca <- prcomp(x = af_geno)
+plot(af_pca)
+fviz_pca_var(af_pca)
+fviz_pca_ind(af_pca)
+```
+
+
+```{r snmf, echo=FALSE, eval=FALSE}
+af_geno[is.na(af_geno)] <- 9
+snmf_dir <- tempfile()
+dir.create(snmf_dir, showWarnings = F)
+snmf_geno_file <- file.path(snmf_dir, "ref_gt.geno")
+write.geno(af_geno, snmf_geno_file)
+af_snmf <- snmf(snmf_geno_file, K = 1:10, repetitions = 100, CPU = 2, entropy = T, seed = 987654321, project = "new")
+
+af_prop_list <- sapply(5:8, function(k) {
+  prop_5 <- Q(af_snmf, K = k, run = which.min(cross.entropy(af_snmf, K = k))) %>% as.data.frame()
+  prop_5$code <- rownames(af_geno)
+  ind_order <- LEA::barchart(af_snmf, K = k, run = which.min(cross.entropy(af_snmf, K = k)), plot = F)
+  # prop_5 <- prop_5[ind_order$order,]
+  # prop <- prop[id_ord$order,]
+  prop_5 <- reshape2::melt(prop_5, 
+                           variable.name = "ancestry", 
+                           value.name = "proportion")
+  prop_5$k <- k
+  prop_5$code <- factor(prop_5$code, levels = prop_5$code[ind_order$order], ordered = F)
+  return(prop_5)
+}, USE.NAMES = T, simplify = F)
+
+af_prop <- do.call(rbind, af_prop_list)
+
+# all snmf results for k = 5 to 8
+ggplot(af_prop) +
+  facet_wrap(vars(k), ncol = 1) +
+  geom_col(aes(x = code, y = proportion, fill = ancestry), width = 1, position = position_stack()) + 
+  scale_fill_viridis_d(option = "B") +
+  theme(axis.text.x = element_text(angle = 90, h = 1, v = .5),
+        panel.background = element_rect(fill = "white"), 
+        panel.grid = element_line(color = "gray", size = .1)) +
+  xlab("individuals") +
+  ylab("ancestry proportion")
+
+fin_prop <- af_prop_list[[3]]
+levels(fin_prop$ancestry) <- c("D", "A", "G", "ER", "N", "C", "OB")
+ggplot(fin_prop) +
+  facet_wrap(vars(k), ncol = 1) +
+  geom_col(aes(x = code, y = proportion, fill = ancestry), width = 1, position = position_stack()) + 
+  scale_fill_viridis_d(option = "B") +
+  theme(axis.text.x = element_text(angle = 90, h = 1, v = .5),
+        panel.background = element_rect(fill = "white"), 
+        panel.grid = element_line(color = "gray", size = .1)) +
+  xlab("individuals") +
+  ylab("ancestry proportion")
+
+reshape2::dcast(fin_prop[,-4], ... ~ ancestry) %>% write_xlsx("./genotyping/african_assignment_K7.xlsx")
+```
+
+
+```{r nj_tree, fig.height=15, fig.width=10}
+vn_lib_geno <- ska_geno[rownames(ska_geno) %in% vn_info$code[vn_info$species %in% c("liberica")],]
+af_lib_geno <- rbind(af_geno, vn_lib_geno)
+
+af_lib_info <- left_join(data.frame(code = rownames(af_lib_geno)),
+                         all_ref_info, 
+                         # all_ref_info %>% rowwise() %>% mutate(code = gsub("_\\D+", paste0("_", group), code)),
+                         by = "code")
+af_lib_info <- left_join(af_lib_info, vn_info %>% dplyr::select(code, species), by = "code")
+
+af_lib_geno[af_lib_geno == 9] <- NA
+af_lib_dist <- dist(af_lib_geno)
+af_lib_tree <- nj(af_lib_dist)
+
+
+ggtree(af_lib_tree, ladderize = T) %<+% af_lib_info +
+  geom_tiplab(aes(color = species),
+              hjust = 1,  align = T, linesize = .2, nudge_x = 6, size = 3) +
+  geom_tippoint(aes(color = species)) 
+```
+
+
+```{r, fig.height=15, fig.width=10}
+af_geno[af_geno == 9] <- NA
+af_dist <- dist(af_geno)
+af_tree <- nj(af_dist)
+
+
+ggtree(af_tree, ladderize = T) %<+% af_info +
+  geom_tiplab(aes(color = group),
+              hjust = 1,  align = T, linesize = .2, nudge_x = 6, size = 3) +
+  geom_tippoint(aes(color = group))
+```
+
+
+```{r}
+seq_gi <- vcfR2genind(ref_vcfR)
+seq_pca <- prcomp(genind2geno(seq_gi), center = T, scale = T)
+seq_pca$x %>% 
+  as_tibble() %>% 
+  mutate(id = gsub("_TR|.{4,7}_", "", indNames(seq_ref_genind))) %>% 
+  relocate(id) %>% 
+  ggplot() + 
+  geom_text(aes(x = PC1, y = PC2, label = id))
+
+fviz_pca_var(seq_pca)
+fviz_pca_ind(seq_pca)
+
+c <- as.data.frame(seq_pca$rotation)[,1:4] %>% 
+  rownames_to_column("snp") %>% 
+  as_tibble() %>% 
+  mutate(across(PC1:PC4, ~ abs(.)))
+hist(c(c$PC1, c$PC2))
+t <- quantile(c(c$PC1, c$PC2), 1-300/length(c(c$PC1, c$PC2)))
+fs <- c  %>% 
+  arrange(desc(PC1)) %>% 
+  slice_head(n = 300*.5) %>% 
+  arrange(desc(PC2)) %>% 
+  slice_head(n = 300*.5) %>% pull(snp)
+fs <- c %>% filter(PC1 > t | PC2 > t)
+fs
+f_pca <- prcomp(genind2geno(seq_gi)[, fs], center = T, scale = T)
+f_pca$x %>% 
+  as_tibble() %>% 
+  mutate(id = gsub("_TR|.{4,7}_", "", indNames(seq_ref_genind))) %>% 
+  relocate(id) %>% 
+  ggplot() + 
+  geom_text(aes(x = PC1, y = PC2, label = id))
+fviz_pca_ind(f_pca)
+fviz_pca_var(f_pca)
+
+```
+
+```{r}
+ref <- read_tsv("/home/baotram/phd/robusta/test_10_clones/sequence_info_final.tsv")
+ref_name <- all_ref_info %>% filter(data == "sequencing") %>% pull(code)
+af_geno <- ska_geno %>% filter(code %in% ref_name)
+rownames(af_geno) <- af_geno$code
+af_geno <- af_geno[,-1]
+af_info <- all_ref_info %>% filter(code %in% ref_name)
+
+af_geno[is.na(af_geno)] <- 9
+lfmm_file <- tempfile(fileext = ".lfmm")
+write.lfmm(af_geno, lfmm_file)
+af_pca <- pca(lfmm_file)
+# remove.pcaProject(ref_pca@pcaProject.file)
+af_pca_proj <- data.frame("code" = rownames(af_geno),
+                          "PC1" = af_pca$projections[,1],
+                          "PC2" = af_pca$projections[,2],
+                          "PC3" = af_pca$projections[,3])
+af_pca_proj <- left_join(af_pca_proj, af_info, by = "code") %>% 
+  mutate(lb = ifelse(is.na(group), code, as.character(group)))
+af_pca_proj$group <- ref$kasp_group[-c(55:64)]
+af_pca_proj$group <- factor(af_pca_proj$group, levels = c("A", "B", "C", "D", "E", "G", "O", "R", "hb"))
+
+eigen <- af_pca$eigenvalues[,1]
+ggplot(af_pca_proj) +
+  # geom_point(aes(x = PC1, y = PC2, color = group)) +
+  geom_text(aes(x = PC1, y = PC2, label = group, color = group)) +
+  xlab(paste0("PC1 (", format(eigen[1]/sum(eigen)*100, digits = 2), "%)")) +
+  ylab(paste0("PC2 (", format(eigen[2]/sum(eigen)*100, digits = 2), "%)")) +
+  scale_color_discrete(na.value = "black")
+```
+

@@ -1,0 +1,1130 @@
+---
+title: "Genetic analysis of the Vietnamese individuals"
+author: "Tram"
+date: "`r date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(DBI)
+library(tidyverse)
+library(LEA)
+library(tibble)
+library(viridis)
+library(ape)
+library(ggtree)
+library(aplot)
+library(readxl)
+library(cowplot)
+library(StAMPP)
+library(adegenet)
+library(dartR)
+library(PopGenReport)
+library(hierfstat)
+library(ggtree)
+library(grid)
+library(factoextra)
+library(FactoMineR)
+```
+
+## Data
+
+```{r get_data}
+con <- dbConnect(RSQLite::SQLite(), dbname = "./genotyping/seq_kasp_array_genotypes_261SNPs.db")
+
+geno <- dbReadTable(con, "genotype")
+info <- dbReadTable(con, "info")
+ref_info <- dbReadTable(con, "ref_info")
+ref_code <- info %>% filter(analysis == "reference") %>% pull(code)
+sample_code <- info %>% filter(analysis == "sample") %>% pull(code)
+all_geno <- geno %>% filter(code %in% c(ref_code, sample_code))
+all_geno <- all_geno %>% column_to_rownames("code")
+vn_geno <- geno %>% filter(code %in% sample_code)
+
+all_geno[is.na(all_geno)] <- 9
+
+all_geno <- readRDS("./R_data/all_geno.RDS")
+all_geno <- all_geno[!rownames(all_geno) %in% c("S-59", "S-138"),]
+rownames(all_geno[-c(220:229),])
+```
+
+```{r}
+acc_info <- read.delim("./raw_genotype/all_accessions_info.tsv")
+acc_info <- acc_info %>% arrange(code)
+# acc_info <- acc_info %>% filter(!grepl("kasp", code))
+all_geno <- read.delim("./raw_genotype/all_genotypes.tsv", row.names = 1)
+all_geno <- all_geno[sort(rownames(all_geno)),]
+# all_geno[is.na(all_geno)] <- 9
+all_geno <- all_geno[!grepl("kasp", rownames(all_geno)),]
+```
+
+
+
+
+
+## PCA
+```{r}
+pca_dir <- "./pca_data"
+dir.create(pca_dir, showWarnings = F)
+
+all_lfmm_file <- file.path(pca_dir, "all.lfmm")
+all_geno[is.na(all_geno)] <- 9
+write.lfmm(all_geno, all_lfmm_file)
+
+all_geno_file<- file.path(pca_dir, "all.geno")
+write.geno(all_geno, all_geno_file)
+```
+
+```{r}
+plotdir <- "./plot_paper"
+```
+
+
+```{r colors}
+group9_col <- c(turbo(5), turbo(4, begin = 0.1, end = 0.9)[-3], "gray50")
+names(group9_col) <- c("E", "O", "C", "A", "D", "R", "B", "G", "Vietnam")
+group9_col <- group9_col[c("D", "C", "G", "A", "B", "O", "R", "E", "Vietnam")]
+```
+
+```{r pca_all}
+all_pca <- pca(all_lfmm_file)
+```
+
+```{r plot_pca_all}
+all_pca_proj <- data.frame("code" = rownames(all_geno),
+                           "PC1" = all_pca$projections[,1],
+                           "PC2" = all_pca$projections[,2],
+                           "PC3" = all_pca$projections[,3])
+all_pca_proj <- left_join(all_pca_proj, acc_info, by = "code")
+eigen <- all_pca$eigenvalues[,1]
+
+all_pca_proj <- all_pca_proj %>% 
+  # mutate(group = ifelse(is.na(group), "Vietnam", group)) %>%
+  # mutate(label = ifelse(group == "Vietnam", as.character(code), group)) %>% 
+  mutate(group = factor(group, levels = names(group9_col)))
+
+tiff(filename = file.path(plotdir, "pca_all.tiff"),
+     width = 6, height = 5, units = "in", res = 1200)
+pca1 <- all_pca_proj %>% 
+  arrange(desc(group)) %>% 
+  filter(!is.na(group)) %>%
+  ggplot() +
+  geom_point(aes(x = PC1, y = PC2, color = group, shape = group), size = 5) +
+  # geom_text(aes(x = PC1, y = PC2, label = code, color = prior_group)) +
+  xlab(paste0("PC1 (", format(eigen[1]/sum(eigen)*100, digits = 2), "%)")) +
+  ylab(paste0("PC2 (", format(eigen[2]/sum(eigen)*100, digits = 2), "%)")) +
+  scale_color_manual(values = group9_col) + 
+  scale_shape_manual(values = 0:8) +
+  theme_minimal() + 
+  theme(panel.border = element_rect(color = "gray", fill = NA),
+        axis.title = element_text(size = 12))
+dev.off()
+```
+
+
+```{r pca_factomineR}
+all_geno[all_geno == 9] <- NA
+# all_geno[is.na(all_geno)] <- 9
+all_pca <- PCA(all_geno)
+fviz_eig(all_pca, addlabels = TRUE)
+
+all_pca_proj <- all_pca$ind$coord[,1:2]
+colnames(all_pca_proj) <- c("PC1", "PC2")
+all_pca_proj <- all_pca_proj %>% 
+  as.data.frame() %>% 
+  rownames_to_column("code") 
+
+all_pca_proj <- left_join(all_pca_proj, ref_info, by = "code")
+
+all_pca_proj <- all_pca_proj %>% 
+  mutate(group = ifelse(is.na(group), "Vietnam", group)) %>%
+  mutate(label = ifelse(group == "Vietnam", as.character(code), group)) %>% 
+  mutate(group = factor(group, levels = names(group9_col)))
+
+eigen <- all_pca$eig[,1]
+
+tiff(filename = file.path(plotdir, "pca_all.tiff"),
+     width = 6, height = 5, units = "in", res = 1200)
+pca1 <- all_pca_proj %>% 
+  arrange(desc(group)) %>% 
+  ggplot() +
+  geom_point(aes(x = PC1, y = PC2, color = group, shape = group), size = 5) +
+  # geom_text(aes(x = PC1, y = PC2, label = label, color = group)) +
+  xlab(paste0("PC1 (", format(eigen[1]/sum(eigen)*100, digits = 2), "%)")) +
+  ylab(paste0("PC2 (", format(eigen[2]/sum(eigen)*100, digits = 2), "%)")) +
+  scale_color_manual(values = group9_col) + 
+  scale_shape_manual(values = 0:8) +
+  theme_minimal() + 
+  theme(panel.border = element_rect(color = "gray", fill = NA),
+        axis.title = element_text(size = 12))
+pca1
+dev.off()
+```
+
+## NJ clustering
+
+```{r}
+all_geno[all_geno == 9] <- NA
+all_dist <- dist(all_geno, method = "euclidean")
+all_dist <- adegenet::dist.genpop(as.genpop(all_genind@tab[nInd(all_genind):1,]), method = 4)
+# all_dist <- dist(all_geno)
+nj_tree <- ape::nj(all_dist)
+plot(nj_tree, "u")
+nj1 <- ggtree(nj_tree, ladderize = F, layout = "ape", color = "gray") %<+% acc_info +
+  # geom_tiplab(aes(subset = grepl("S-", label), color = group), hjust = -0.5,
+  #             linesize = .2, size = 5) +
+  geom_tippoint(aes(color = group, shape = group, size = group, alpha = group)) +
+  guides(color = guide_legend(title = "group")) +
+  scale_shape_manual(values = 0:8) +
+  scale_color_manual(values = group9_col) +
+  scale_size_manual(values = c(rep(5, 8), 2)) +
+  scale_alpha_manual(values = c(rep(1, 8), 0.8)) +
+  coord_flip() + scale_y_reverse() + scale_x_reverse()
+
+ggtree(hclust(all_dist), ladderize = F, layout = "dendrogram") %<+% acc_info +
+  # geom_tiplab(aes(subset = grepl("S-", label), color = group), hjust = -0.5,
+  #             linesize = .2, size = 5) +
+  geom_tippoint(aes(color = group), shape = 16, size = 3) +
+  guides(color = guide_legend(title = "group")) +
+  scale_shape_manual(values = 0:8) +
+  scale_color_manual(values = group9_col)
+```
+
+```{r}
+treeCuts <- cutree(hclust(all_dist), k = 5)
+g <- split(names(treeCuts), treeCuts)
+clades <- sapply(g, function(n) tidytree::MRCA(p, n))
+names(clades) <- c("O", "E", "A", "C", "D")
+p <- ggtree(hclust(all_dist))
+p <- tidytree::groupClade(p, clades, group_name='group') + ggtree::aes(color=group)
+p %<+% (acc_info %>% rename(prior_group = group)) + 
+  ggtree::layout_dendrogram() +
+  geom_tippoint(aes(color = prior_group), shape = 16, size = 3) +
+  # geom_tiplab(aes(label = group), size = 2) +
+  scale_color_manual(values = group9_col)
+  ggtree::geom_tiplab(ggtree::aes(label=label),
+                      angle= 90, hjust=1,
+                      offset = -0.4,
+                      align = TRUE, color='black') +
+  viridis::scale_color_viridis(discrete = T, option = "C", breaks = 1:6) +
+  # ggplot2::geom_vline(xintercept = -(cutOff/2), linetype = 2) +
+  ggtree::geom_text(x = (cutOff/2 - max(taleTree$height)/50),
+                    y = 4, label = paste("half of 'cutOff' value: ", sprintf("%.2f", cutOff/2)),
+                    color = "darkgrey", fontface = "plain") +
+  ggplot2::xlab("Height/2") +
+  ggtree::theme_dendrogram(plot.margin = ggplot2::margin(6,6,220,6))
+```
+
+```{r}
+af_genind <- all_genind[indNames(all_genind) %in% acc_info$code[acc_info$prior_group != "Vietnam"]]
+af_dist <- adegenet::dist.genpop(as.genpop(af_genind@tab), method = 4)
+# all_dist <- dist(all_geno)
+af_nj_tree <- ape::nj(af_dist)
+plot(af_nj_tree, "u")
+
+ggtree(af_nj_tree, ladderize = F, layout = "fan") %<+% acc_info +
+  # geom_tiplab(aes(subset = grepl("S-", label), color = group), hjust = -0.5,
+  #             linesize = .2, size = 5) +
+  geom_tippoint(aes(color = prior_group), shape = 16, size = 3) +
+  guides(color = guide_legend(title = "group")) +
+  scale_shape_manual(values = 0:8) +
+  scale_color_manual(values = group9_col)
+```
+
+
+## Genetic diversity of the whole collection and the reference
+
+
+
+```{r pca_all}
+all_pca <- pca(all_lfmm_file)
+```
+
+```{r plot_pca_all}
+all_pca_proj <- data.frame("code" = rownames(all_geno),
+                           "PC1" = all_pca$projections[,1],
+                           "PC2" = all_pca$projections[,2],
+                           "PC3" = all_pca$projections[,3])
+all_pca_proj <- left_join(all_pca_proj, ref_info, by = "code")
+eigen <- all_pca$eigenvalues[,1]
+
+all_pca_proj <- all_pca_proj %>% 
+  mutate(group = ifelse(is.na(group), "Vietnam", group)) %>%
+  mutate(label = ifelse(group == "Vietnam", as.character(code), group)) %>% 
+  mutate(group = factor(group, levels = names(group9_col)))
+
+tiff(filename = file.path(plotdir, "pca_all.tiff"),
+     width = 6, height = 5, units = "in", res = 1200)
+pca1 <- all_pca_proj %>% 
+  arrange(desc(group)) %>% 
+  ggplot() +
+  geom_point(aes(x = PC1, y = PC2, color = group, shape = group), size = 5) +
+  # geom_text(aes(x = PC1, y = PC2, label = label, color = group)) +
+  xlab(paste0("PC1 (", format(eigen[1]/sum(eigen)*100, digits = 2), "%)")) +
+  ylab(paste0("PC2 (", format(eigen[2]/sum(eigen)*100, digits = 2), "%)")) +
+  scale_color_manual(values = group9_col) + 
+  scale_shape_manual(values = 0:8) +
+  theme_minimal() + 
+  theme(panel.border = element_rect(color = "gray", fill = NA),
+        axis.title = element_text(size = 12))
+dev.off()
+
+all_pca_proj %>% 
+  arrange(desc(group)) %>% 
+  ggplot() +
+  geom_text(aes(x = PC1, y = PC3, label = label, color = group)) +
+  xlab(paste0("PC1 (", format(eigen[1]/sum(eigen)*100, digits = 2), "%)")) +
+  ylab(paste0("PC3 (", format(eigen[3]/sum(eigen)*100, digits = 2), "%)")) +
+  scale_color_manual(values = c(turbo(8), "gray50")) + 
+  theme_minimal()
+```
+
+
+
+
+```{r run_snmf}
+all_snmf <- snmf(input.file = all_geno_file, K = 1:10, 
+                 repetitions = 100, CPU = 3, 
+                 entropy = T, seed = 987654321, project = "new")
+plot(all_snmf)
+
+all_prop_list <- sapply(5:8, function(k) {
+    prop_5 <- Q(all_snmf, K = k, run = which.min(cross.entropy(all_snmf, K = k))) %>% as.data.frame()
+    prop_5$code <- acc_info$code
+    prop_5 <- left_join(prop_5, acc_info, by = "code")
+    ind_order <- LEA::barchart(all_snmf, K = k, run = which.min(cross.entropy(all_snmf, K = k)), plot = F)
+    # prop_5 <- prop_5[ind_order$order,]
+    # prop <- prop[id_ord$order,]
+    prop_5 <- pivot_longer(prop_5, cols = starts_with("V"), 
+                           names_to = "ancestry", values_to = "proportion")
+    prop_5$k <- k
+    return(prop_5)
+  }, USE.NAMES = T, simplify = F)
+  
+all_snmf_prop <- do.call(rbind, all_prop_list)
+```
+
+
+```{r}
+k <- 8
+all_snmf_prop <- Q(all_snmf, K = k, 
+                   run = which.min(cross.entropy(all_snmf, K = k)))
+all_order <- LEA::barchart(all_snmf, K = k, 
+                           run = which.min(cross.entropy(all_snmf, K = k)), 
+                           plot = F)
+
+all_snmf_prop %>% 
+  as.data.frame() %>%
+  mutate(code = rownames(all_geno)) %>%
+  mutate(code = factor(code, levels = code[all_order$order])) %>%
+  pivot_longer(cols = starts_with("V"),
+               names_to = "ancestry",
+               values_to = "proportion") %>%
+  left_join(., acc_info)
+ggplot(all_snmf_prop) +
+  facet_grid(rows = vars(paste("K =", k)), cols = vars(group),
+             scales = "free", space = "free") +
+  geom_col(aes(x = code, y = proportion, fill = ancestry), width = 1) +
+  scale_fill_manual(values = as.character(group9_col)) +
+  theme(axis.text.x = element_text(angle = 90, h = 1, v = .5),
+        panel.background = element_rect(fill = "white"), 
+        panel.grid = element_line(color = "gray", size = .1)) 
+```
+
+```{r}
+all_genind@strata <- acc_info
+all_prop <- snmf_az(all_genind, snmf_rep = 200, k_values = 1:10, CPUs = 3, k_plot = 3:8)
+```
+
+
+```{r snmf_567}
+all_prop <- readRDS("./R_data/all_prop.RDS")
+all_snmf_prop <- do.call(rbind, all_prop)
+
+ind_ord <- all_snmf_prop %>% 
+  filter(k == 7) %>% 
+  select(code, ancestry, proportion) %>% 
+  pivot_wider(names_from = ancestry, values_from = proportion) %>% 
+  rowwise() %>% 
+  mutate(snmf_group = which.max(c(V1,V2,V3,V4,V5,V6,V7))) %>% 
+  arrange(snmf_group, desc(across(V1:V7))) %>% pull(code) %>% as.character()
+
+ancestry_ord <- all_snmf_prop %>% 
+  # mutate(group = if_else(source == "sample", "Vietnam", group)) %>% 
+  # filter(!group %in% c("B", "R")) %>% 
+  rowwise() %>% 
+  mutate(new_ancestry = which(names(group9_col) %in% group)) %>% 
+  group_by(ancestry, k) %>% 
+  # slice_max(proportion) %>% 
+  arrange(desc(proportion)) %>%
+  slice_head(n=1) %>%
+  # mutate(new_ancestry = as.numeric(group)) %>% 
+  select(ancestry, new_ancestry, k)
+
+# left_join(all_snmf_prop, ancestry_ord, by = c("ancestry", "k"))
+anc_cols <- group9_col
+names(anc_cols) <- 1:9
+
+tiff(filename = file.path(plotdir, "snmf_567.tiff"),
+     width = 14, height = 7, units = "in", res = 1200)
+all_snmf_prop %>% 
+  left_join(., ancestry_ord, by = c("ancestry", "k")) %>% 
+  # filter(k != 8) %>%
+  mutate(code = fct_relevel(code, ind_ord6)) %>% 
+  mutate(group = fct_relevel(group, names(group9_col))) %>% 
+  ggplot() +
+  facet_grid(rows = vars(paste("K =", k)), cols = vars(group),
+             scales = "free", space = "free") +
+  geom_col(aes(x = code, y = proportion, fill = as.factor(new_ancestry)), 
+           width = 1, show.legend = F) +
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        panel.background = element_rect(fill = "white"), 
+        panel.grid = element_blank(),
+        strip.background = element_blank(),
+        strip.text = element_text(size = 20),
+        axis.title = element_text(size = 15),
+        panel.border = element_rect(fill = NA, color = "gray", size = 1),
+        panel.spacing.y = unit(0.04, "npc"),
+        panel.spacing.x = unit(0.01, "npc")) +
+  scale_fill_manual(values = anc_cols) +
+  xlab("Individual") +
+  ylab("Ancestry proportion") +
+  scale_y_continuous(expand = c(0, 0))
+dev.off()
+```
+
+
+```{r}
+all_snmf_prop %>% 
+  filter(k == 7) %>% 
+  ggplot() +
+  facet_grid(rows = vars(paste("K =", k)), cols = vars(prior_group),
+             scales = "free", space = "free") +
+  geom_col(aes(x = code, y = proportion, fill = as.factor(ancestry)), 
+           width = 1, show.legend = F) +
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        panel.background = element_rect(fill = "white"), 
+        panel.grid = element_blank(),
+        strip.background = element_blank(),
+        strip.text = element_text(size = 20),
+        axis.title = element_text(size = 15),
+        panel.border = element_rect(fill = NA, color = "gray", size = 1),
+        panel.spacing.y = unit(0.04, "npc"),
+        panel.spacing.x = unit(0.01, "npc")) +
+  scale_fill_manual(values = as.character(anc_cols)) +
+  xlab("Individual") +
+  ylab("Ancestry proportion") +
+  scale_y_continuous(expand = c(0, 0))
+```
+
+
+```{r snmf_67}
+tiff(filename = file.path(plotdir, "snmf_67.tiff"),
+     width = 14, height = 5, units = "in", res = 1200)
+all_snmf_prop %>% 
+  left_join(., ancestry_ord, by = c("ancestry", "k")) %>% 
+  filter(k %in% 6:7) %>%
+  mutate(code = fct_relevel(code, ind_ord),
+         group = if_else(source == "sample", "Vietnam", as.character(group))) %>% 
+  mutate(group = factor(group, names(group9_col))) %>% 
+  ggplot() +
+  facet_grid(rows = vars(paste("K =", k)), cols = vars(group),
+             scales = "free", space = "free") +
+  geom_col(aes(x = code, y = proportion, fill = as.factor(new_ancestry)), 
+           width = 1, show.legend = F) +
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        panel.background = element_rect(fill = "white"), 
+        panel.grid = element_blank(),
+        strip.background = element_blank(),
+        strip.text = element_text(size = 20),
+        axis.title = element_text(size = 15),
+        panel.border = element_rect(fill = NA, color = "gray", size = 1),
+        panel.spacing.y = unit(0.04, "npc"),
+        panel.spacing.x = unit(0.01, "npc")) +
+  scale_fill_manual(values = anc_cols) +
+  xlab("Individual") +
+  ylab("Ancestry proportion") +
+  scale_y_continuous(expand = c(0, 0))
+dev.off()
+```
+
+```{r snmf_6}
+ref_ord6 <- all_snmf_prop %>% 
+  filter(k == 6, group != "Vietnam") %>% 
+  select(code, ancestry, proportion, group) %>% 
+  pivot_wider(names_from = ancestry, values_from = proportion) %>% 
+  rowwise() %>% 
+  mutate(snmf_group = which.max(c(V1,V2,V3,V4,V5,V6))) %>% 
+  group_by(group) %>% 
+  arrange(desc(V3), V6, V1, V2, V4, V5, .by_group = T) %>% pull(code) %>% as.character()
+
+vn_ord6 <- all_snmf_prop %>% 
+  filter(k == 6, group == "Vietnam") %>% 
+  select(code, ancestry, proportion, group) %>% 
+  group_by(code) %>% 
+  arrange(desc(proportion), .by_group = T) %>% 
+  slice_head(n = 2) %>% 
+  slice_tail(n =1) %>% 
+  group_by(ancestry) %>% 
+  arrange(desc(proportion), .by_group = T) %>% pull(code)
+  # pivot_wider(names_from = ancestry, values_from = proportion) %>% 
+  # rowwise() %>% 
+  # mutate(snmf_group = which(c(V1,V2,V3,V4,V5,V6) == sort(c(V1,V2,V3,V4,V5,V6))[2])) %>% 
+  # group_by(snmf_group) %>% 
+  # arrange(V1, V2, V3, V4, V5, V6, .by_group = T) %>% pull(code) %>% as.character()
+
+ind_ord6 <- c(ref_ord6, vn_ord6)
+
+ancestry_ord6 <- all_snmf_prop %>% 
+  filter(k == 6) %>% 
+  # mutate(group = if_else(source == "sample", "Vietnam", group)) %>% 
+  filter(!group %in% c("B", "R")) %>% 
+  rowwise() %>% 
+  mutate(new_ancestry = which(names(group9_col) %in% group)) %>% 
+  group_by(ancestry) %>% 
+  arrange(desc(proportion)) %>% 
+  slice_head(n=1) %>% 
+  # mutate(new_ancestry = as.numeric(group)) %>% 
+  select(ancestry, new_ancestry)
+
+# left_join(all_snmf_prop, ancestry_ord, by = c("ancestry", "k"))
+# anc_cols <- c(turbo(8, begin = 0.08), "gray40")
+anc_cols <- group9_col
+names(anc_cols) <- 1:9
+
+tiff(filename = file.path(plotdir, "snmf_.tiff"),
+     width = 14, height = 7, units = "in", res = 1200)
+all_snmf_prop6 <- all_snmf_prop %>% 
+  left_join(., ancestry_ord6, by = "ancestry") %>% 
+  filter(k == 6) %>%
+  mutate(code = factor(code, levels = ind_ord6)) %>% 
+  mutate(group = fct_relevel(group, names(group9_col)))
+
+snmf1 <- ggplot(all_snmf_prop6) +
+  facet_grid(cols = vars(group),
+             scales = "free", space = "free") +
+  geom_col(aes(x = code, y = proportion, fill = as.factor(new_ancestry)), 
+           width = 1, show.legend = F) +
+  theme(axis.text.x = element_blank(),
+        axis.title.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        panel.background = element_rect(fill = "white"), 
+        panel.grid = element_blank(),
+        strip.background = element_blank(),
+        strip.text = element_text(size = 12),
+        axis.title = element_text(size = 12),
+        panel.border = element_rect(fill = NA, color = "gray", size = 1),
+        panel.spacing.y = unit(0.04, "npc"),
+        panel.spacing.x = unit(0.01, "npc")) +
+  scale_fill_manual(values = anc_cols) +
+  xlab("Individual") +
+  ylab("Ancestry proportion") +
+  scale_y_continuous(expand = c(0, 0))
+dev.off()
+```
+
+```{r}
+all_snmf_prop6 %>% 
+  filter(group == "Vietnam", ancestry == "V3", proportion < 0.8)
+```
+
+```{r snmf_5}
+ref_ord5 <- all_snmf_prop %>% 
+  filter(k == 5, group != "Vietnam") %>% 
+  select(code, ancestry, proportion, group) %>% 
+  pivot_wider(names_from = ancestry, values_from = proportion) %>% 
+  rowwise() %>% 
+  mutate(snmf_group = which.max(c(V1,V2,V3,V4,V5))) %>% 
+  group_by(group) %>% 
+  arrange(desc(V3), V1, V2, V4, V5, .by_group = T) %>% pull(code) %>% as.character()
+
+vn_ord5 <- all_snmf_prop %>% 
+  filter(k == 5, group == "Vietnam") %>% 
+  select(code, ancestry, proportion, group) %>% 
+  group_by(code) %>% 
+  arrange(desc(proportion), .by_group = T) %>% 
+  slice_head(n = 2) %>% 
+  slice_tail(n =1) %>% 
+  group_by(ancestry) %>% 
+  arrange(desc(proportion), .by_group = T) %>% pull(code)
+  # pivot_wider(names_from = ancestry, values_from = proportion) %>% 
+  # rowwise() %>% 
+  # mutate(snmf_group = which(c(V1,V2,V3,V4,V5,V6) == sort(c(V1,V2,V3,V4,V5,V6))[2])) %>% 
+  # group_by(snmf_group) %>% 
+  # arrange(V1, V2, V3, V4, V5, V6, .by_group = T) %>% pull(code) %>% as.character()
+
+ind_ord5 <- c(ref_ord5, vn_ord5)
+
+ancestry_ord5 <- all_snmf_prop %>% 
+  filter(k == 5) %>% 
+  # mutate(group = if_else(source == "sample", "Vietnam", group)) %>% 
+  filter(!group %in% c("B", "R")) %>% 
+  rowwise() %>% 
+  mutate(new_ancestry = which(names(group9_col) %in% group)) %>% 
+  group_by(ancestry) %>% 
+  arrange(desc(proportion)) %>% 
+  slice_head(n=1) %>% 
+  # mutate(new_ancestry = as.numeric(group)) %>% 
+  select(ancestry, new_ancestry)
+
+# left_join(all_snmf_prop, ancestry_ord, by = c("ancestry", "k"))
+# anc_cols <- c(turbo(8, begin = 0.08), "gray40")
+anc_cols <- group9_col
+names(anc_cols) <- 1:9
+
+tiff(filename = file.path(plotdir, "snmf_.tiff"),
+     width = 14, height = 7, units = "in", res = 1200)
+all_snmf_prop5 <- all_snmf_prop %>% 
+  left_join(., ancestry_ord5, by = "ancestry") %>% 
+  filter(k == 5) %>%
+  mutate(code = factor(code, levels = ind_ord5)) %>% 
+  mutate(group = fct_relevel(group, names(group9_col)))
+
+snmf1 <- ggplot(all_snmf_prop5) +
+  facet_grid(cols = vars(group),
+             scales = "free", space = "free") +
+  geom_col(aes(x = code, y = proportion, fill = as.factor(new_ancestry)), 
+           width = 1, show.legend = F) +
+  theme(axis.text.x = element_blank(),
+        axis.title.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        panel.background = element_rect(fill = "white"), 
+        panel.grid = element_blank(),
+        strip.background = element_blank(),
+        strip.text = element_text(size = 12),
+        axis.title = element_text(size = 12),
+        panel.border = element_rect(fill = NA, color = "gray", size = 1),
+        panel.spacing.y = unit(0.04, "npc"),
+        panel.spacing.x = unit(0.01, "npc")) +
+  scale_fill_manual(values = anc_cols) +
+  xlab("Individual") +
+  ylab("Ancestry proportion") +
+  scale_y_continuous(expand = c(0, 0), breaks = seq(0, 1, 0.1))
+dev.off()
+```
+
+```{r plot_pca_snmf}
+tiff(filename = file.path(plotdir, "pca_snmf6.tiff"),
+     width = 8, height = 10, units = "in", res = 1200)
+plot_grid(pca1, snmf1, nrow = 2, ncol = 1,
+          rel_heights = c(1.8,1), 
+          labels = c("A", "B"))
+dev.off()
+```
+
+
+```{r plot_nj_snmf}
+tiff(filename = file.path(plotdir, "nj_snmf6.tiff"),
+     width = 10, height = 6, units = "in", res = 1200)
+plot_grid(nj1, snmf1, nrow = 2, ncol = 1, rel_heights = c(1.2, 1),
+          labels = c("A", "B"))
+dev.off()
+```
+
+## statistics
+
+```{r}
+summary(all_genind)
+snp_hetero <- as.data.frame(summary(all_genind)[6:7]) %>% 
+  rownames_to_column("chrom") %>% 
+  mutate(pos = as.numeric(gsub(".+_", "", chrom)),
+         chrom = paste("Chr", gsub("(CC1_8_Chr|_\\d+)", "", chrom)))
+ggplot(snp_hetero) +
+  facet_grid(rows = vars(chrom)) + 
+  geom_point(aes(x = pos/1e6, y = Hobs), color = "#77addd") +
+  geom_point(aes(x = pos/1e6, y = Hexp), color = "black") +
+  theme_minimal()
+ggplot(snp_hetero) + 
+  geom_point(aes(x = Hobs, y = Hexp)) +
+  theme_minimal()
+```
+
+
+```{r}
+# pure reference
+pure_ref <- all_snmf_prop %>% 
+  filter(k == 6, group != "Vietnam") %>% 
+  group_by(code) %>% 
+  slice_max(proportion) %>% 
+  filter(proportion > 0.8) %>% 
+  pull(code)
+vn_id <- all_snmf_prop %>% 
+  filter(group == "Vietnam") %>% 
+  pull(code) %>% unique()
+```
+
+```{r}
+all_df <- all_geno
+all_df[all_df == 0] <- 11
+all_df[all_df == 1] <- 12
+all_df[all_df == 2] <- 22
+all_genind <- df2genind(all_df, ncode = 1, pop = acc_info$group)
+grp_genind <- all_genind[c(pure_ref, vn_id)]
+summary(grp_genind)
+all_genlight <- gi2gl(all_genind)
+grp_genlight <- gi2gl(grp_genind)
+grp_geno <- all_geno[rownames(all_geno) %in% indNames(grp_genind),]
+```
+
+```{r}
+grp_geno <- all_geno
+grp_genind <- all_genind
+grp_genind@strata$other_pop <- grp_genind@strata$group
+grp_genind@strata$other_pop[grp_genind@strata$other_pop != "Vietnam"] <- "Africa"
+pop(grp_genind) <- grp_genind@strata$other_pop
+```
+
+allelic richness
+```{r}
+grp_df <- cbind(pop = grp_genind@pop, grp_geno)
+ar <- allelic.richness(grp_df)
+colMeans(ar$Ar)
+
+
+allel.rich(grp_genind)
+```
+
+
+```{r}
+pairwise.WCfst(all_df)
+summary(all_genind)
+fst <- stamppFst(grp_genlight, nboots = 100)
+
+beta.dosage(all_geno, Mb = T)
+```
+
+```{r}
+all_stats <- basic.stats(grp_df)
+colMeans(all_stats$Ho)
+colMeans(all_stats$Hs)
+colMeans(all_stats$Fis, na.rm = T)
+Ho(cbind(pop = acc_info$group, all_df))
+Fis <- fis.dosage(all_geno, pop = acc_info$group)
+Fis
+
+allele.dist(grp_genind)
+```
+## The core set
+
+```{r pca_core6}
+core6 <- read_xlsx("./core_selection/corehunter_selection_SH_EE_35_acc_cuttings_20211020.xlsx")
+core6 <- core6 %>% 
+  mutate(core6 = if_else(grepl("TR", code), "core", core6)) 
+
+pca2 <- core6 %>% 
+  select(code, core6) %>% 
+  right_join(., all_pca_proj, by = "code") %>% 
+  mutate(group = if_else(!is.na(core6), "Vietnam core set", as.character(group))) %>% 
+  mutate(group = fct_relevel(group, names(group9_col))) %>% 
+  arrange(group) %>% 
+  ggplot() +
+  geom_point(aes(x = PC1, y = PC2, color = group, shape = group), size = 5) +
+  # geom_text(aes(x = PC1, y = PC2, label = label, color = group)) +
+  xlab(paste0("PC1 (", format(eigen[1]/sum(eigen)*100, digits = 2), "%)")) +
+  ylab(paste0("PC2 (", format(eigen[2]/sum(eigen)*100, digits = 2), "%)")) +
+  scale_color_manual(values = c(as.character(group9_col), "gold3")) + 
+  scale_shape_manual(values = c(0:8, 8)) +
+  theme_minimal() + 
+  theme(panel.border = element_rect(color = "gray", fill = NA),
+        axis.title = element_text(size = 12))
+```
+
+```{r}
+ind_contrib <- all_pca$ind$contrib
+vn_contrib <- colSums(ind_contrib[grepl("^(S-|TR)", rownames(ind_contrib)),])[1:2] %>% 
+  as.data.frame() %>% 
+  colMeans()
+core_contrib <- colSums(ind_contrib[rownames(ind_contrib) %in% core6$code[core6$core6 == "core"],])[1:2] %>% 
+  as.data.frame() %>% 
+  colMeans()
+core_contrib/vn_contrib
+```
+
+
+```{r plot_eval_pca}
+eval_core_6 <- readRDS("./R_data/eval_core_6.RDS")
+tiff(filename = file.path(plotdir, "eval_core_6.tiff"),
+     width = 5, height = 8, units = "in", res = 1200)
+eval_plots <- plot_list(gglist = gglist(list(eval_core_6$plot[[5]], 
+                               eval_core_6$plot[[7]],
+                               eval_core_6$plot[[8]])), 
+          nrow = 2, ncol = 3,
+          labels = c("A", "B", "C"))
+plot_list(gglist = gglist(list(eval_plots, pca2)), 
+          nrow = 2, ncol = 1, heights = c(0.5,1),
+          labels = c("", "D"))
+dev.off()
+
+```
+
+```{r}
+eval_plots <- plot_grid(eval_core_6$plot[[5]], 
+                        eval_core_6$plot[[7]],
+                        eval_core_6$plot[[8]],
+                        nrow = 1, labels = c("A", "B", "C"))
+tiff(filename = file.path(plotdir, "eval_core_6.tiff"),
+     width = 8, height = 9, units = "in", res = 1200)
+plot_grid(eval_plots, pca2, ncol = 1, labels = c("", "D"), rel_heights = c(0.6, 1))
+dev.off()
+```
+
+
+```{r}
+vn_genind <- all_genind[all_genind@pop == "Vietnam"]
+core_genind <- vn_genind[indNames(vn_genind) %in% core6$code[core6$core6 == "core"]]
+vn_dist <- adegenet::dist.genpop(as.genpop(vn_genind@tab), method = 4)
+core_dist <- adegenet::dist.genpop(as.genpop(core_genind@tab), method = 4)
+
+full_dist_df <- data.frame(n = length(vn_dist), distance = as.vector(vn_dist))
+core_dist_df <- data.frame(n = length(core_dist), distance = as.vector(core_dist))
+
+pw_dist <- ggplot() +
+  geom_histogram(data = full_dist_df, aes(distance), fill = "gray50", bins = 30) +
+  geom_histogram(data = core_dist_df, aes(distance), fill = "gold3", bins = 30) +
+  xlab("Pairwise Euclidean distance") + ylab("Count") + 
+  theme_minimal()
+
+eval_plots <- plot_grid(eval_core_6$plot[[5]], 
+                        eval_core_6$plot[[7]],
+                        pw_dist,
+                        nrow = 1, labels = c("A", "B", "C"))
+tiff(filename = file.path(plotdir, "eval_core_6.tiff"),
+     width = 8, height = 9, units = "in", res = 1200)
+plot_grid(eval_plots, pca2, ncol = 1, labels = c("", "D"), rel_heights = c(0.6, 1))
+dev.off()
+```
+
+
+## Genetic structure of the Congolese-related VN individuals
+
+
+```{r tree}
+cg_vn <- all_snmf_prop6 %>% 
+  filter(group %in% c("O", "B", "R", "E") | (group == "Vietnam" & new_ancestry == 8 & proportion > 0.8)) 
+
+cg_vn_genind <- all_genind[unique(cg_vn$code)]
+cg_vn_dist <- dist(cg_vn_genind, method = "euclidean")
+cg_vn_hclust <- hclust(cg_vn_dist, method = "ward.D")
+plot(cg_vn_hclust)
+
+cg_vn_tree <- nj(cg_vn_dist)
+
+ggtree(cg_vn_tree, ladderize = T) +
+  geom_tiplab(hjust = 1,  align = F, linesize = .2, nudge_x = .2, size = 2)
+
+ggtree(cg_vn_hclust, layout = "dendrogram") %<+% (acc_info %>% filter(code %in% cg_vn$code)) +
+  geom_tippoint(aes(color = group), shape = 16, size = 3) +
+  geom_tiplab(aes(label = pop), angle = 90, hjust = 1, size = 3) +
+  guides(color = guide_legend(title = "group")) +
+  scale_shape_manual(values = 0:8) +
+  scale_color_manual(values = group9_col)
+```
+
+```{r}
+p <- ggtree(cg_vn_hclust)
+treeCuts <- cutree(cg_vn_hclust, k = 5)
+g <- split(names(treeCuts), treeCuts)
+clades <- sapply(g, function(n) tidytree::MRCA(p, n))
+names(clades) <- c("E", "B", "O", "R", "Vietnam")
+p <- tidytree::groupClade(p, clades, group_name='group') + ggtree::aes(color=group)
+p %<+% (acc_info %>% rename(prior_group = group) %>% filter(code %in% cg_vn$code)) + 
+  # ggtree::layout_dendrogram() +
+  geom_tippoint(aes(color = prior_group), shape = 16, size = 1.5) +
+  geom_tiplab(aes(label = pop), size = 2.5) +
+  scale_color_manual(values = group9_col)
+```
+
+
+```{r pca_lea}
+pca_dir <- "./pca_data"
+dir.create(pca_dir, showWarnings = F)
+
+vn_lfmm_file <- file.path(pca_dir, "cg_vn.lfmm")
+cg_vn_geno <- all_geno[which(rownames(all_geno) %in% cg_vn$code),]
+write.lfmm(cg_vn_geno, vn_lfmm_file)
+
+cg_vn_pca <- pca(vn_lfmm_file)
+vn_pca_proj <- data.frame("code" = rownames(cg_vn_geno),
+                           "PC1" = cg_vn_pca$projections[,1],
+                           "PC2" = cg_vn_pca$projections[,2],
+                           "PC3" = cg_vn_pca$projections[,3])
+eigen <- cg_vn_pca$eigenvalues[,1]
+
+vn_pca_proj %>% 
+  ggplot() +
+  geom_text(aes(x = PC1, y = PC2, label = code)) +
+  xlab(paste0("PC1 (", format(eigen[1]/sum(eigen)*100, digits = 2), "%)")) +
+  ylab(paste0("PC2 (", format(eigen[2]/sum(eigen)*100, digits = 2), "%)")) +
+  scale_color_manual(values = c(turbo(8), "gray50")) + 
+  theme_minimal() +
+  scale_x_reverse()
+
+
+vn_pca_proj %>% 
+  ggplot() +
+  geom_text(aes(x = PC1, y = PC3, label = code)) +
+  xlab(paste0("PC1 (", format(eigen[1]/sum(eigen)*100, digits = 2), "%)")) +
+  ylab(paste0("PC3 (", format(eigen[3]/sum(eigen)*100, digits = 2), "%)")) +
+  scale_color_manual(values = c(turbo(8), "gray50")) + 
+  theme_minimal() +
+  scale_x_reverse()
+```
+
+```{r pca_factomineR}
+cg_vn_pca <- PCA(cg_vn_geno)
+vn_pca_proj <- cg_vn_pca$ind$coord[,1:3]
+colnames(vn_pca_proj) <- c("PC1", "PC2", "PC3")
+vn_pca_proj <- vn_pca_proj %>% 
+  as.data.frame() %>% 
+  rownames_to_column("code") 
+
+vn_pca_proj <- left_join(vn_pca_proj, ref_info, by = "code")
+
+vn_pca_proj <- vn_pca_proj %>% 
+  mutate(group = ifelse(is.na(group), "Vietnam", group)) %>%
+  mutate(label = ifelse(group == "Vietnam", as.character(code), group)) %>% 
+  mutate(group = factor(group, levels = names(group9_col)))
+
+vn_eigen <- cg_vn_pca$eig[,1]
+vn_pca_proj %>% 
+  arrange(desc(group)) %>% 
+  ggplot() +
+  geom_point(aes(x = PC1, y = PC2, color = group, shape = group), size = 5) +
+  # geom_text(aes(x = PC1, y = PC2, label = label, color = group)) +
+  xlab(paste0("PC1 (", format(vn_eigen[1]/sum(vn_eigen)*100, digits = 2), "%)")) +
+  ylab(paste0("PC2 (", format(vn_eigen[2]/sum(vn_eigen)*100, digits = 2), "%)")) +
+  scale_color_manual(values = group9_col) + 
+  scale_shape_manual(values = 0:8) +
+  theme_minimal() + 
+  theme(panel.border = element_rect(color = "gray", fill = NA),
+        axis.title = element_text(size = 12))
+```
+
+
+```{r snmf}
+cgvn_geno <- all_geno[rownames(all_geno) %in% cg_vn$code,]
+cgvn_geno_file<- file.path(pca_dir, "cgvn.geno")
+write.geno(cgvn_geno, cgvn_geno_file)
+cg_vn_snmf <- snmf(cgvn_geno_file, K = 1:5, 
+                 repetitions = 100, CPU = 3, 
+                 entropy = T, seed = 987654321, project = "new")
+plot(cg_vn_snmf)
+```
+
+```{r}
+cgvn_prop_list <- sapply(1:5, function(k) {
+    prop_5 <- Q(cg_vn_snmf, K = k, run = which.min(cross.entropy(cg_vn_snmf, K = k))) %>% as.data.frame()
+    prop_5$code <- indNames(cg_vn_genind)
+    prop_5 <- left_join(prop_5, 
+                        acc_info %>% filter(code %in% indNames(cg_vn_genind)), 
+                        by = "code")
+    ind_order <- LEA::barchart(cg_vn_snmf, K = k, run = which.min(cross.entropy(cg_vn_snmf, K = k)), plot = F)
+    # prop_5 <- prop_5[ind_order$order,]
+    # prop <- prop[id_ord$order,]
+    prop_5 <- pivot_longer(prop_5, cols = starts_with("V"), 
+                           names_to = "ancestry", values_to = "proportion")
+    prop_5$k <- k
+    return(prop_5)
+  }, USE.NAMES = T, simplify = F)
+  
+cgvn_snmf_prop <- do.call(rbind, cgvn_prop_list)
+
+ggplot(cgvn_snmf_prop) +
+  facet_grid(rows = vars(paste("K =", k)), cols = vars(group),
+             scales = "free", space = "free") +
+  geom_col(aes(x = code, y = proportion, fill = ancestry), width = 1) +
+  scale_fill_manual(values = as.character(group9_col)) +
+  theme(axis.text.x = element_text(angle = 90, h = 1, v = .5),
+        panel.background = element_rect(fill = "white"), 
+        panel.grid = element_line(color = "gray", size = .1)) 
+```
+
+
+```{r pcoa}
+library(dartR)
+cg_vn_pcoa <- pcoa(cg_vn_dist, col = group9_col[as.character(cg_vn_genind@pop)],
+                   label = as.character(cg_vn_genind@pop))
+cg_vn_pcoa <- gl.pcoa(gi2gl(cg_vn_genind))
+vn_pcoa_proj <- cg_vn_pcoa$scores
+
+vn_pcoa_proj <- cg_vn_pca$ind$coord[,1:3]
+colnames(vn_pcoa_proj) <- c("PC1", "PC2", "PC3", "PC4", "PC5")
+vn_pcoa_proj <- vn_pcoa_proj %>% 
+  as.data.frame() %>% 
+  rownames_to_column("code") 
+
+vn_pcoa_proj <- left_join(vn_pcoa_proj, ref_info, by = "code")
+
+vn_pcoa_proj <- vn_pcoa_proj %>% 
+  mutate(group = ifelse(is.na(group), "Vietnam", group)) %>%
+  mutate(label = ifelse(group == "Vietnam", as.character(code), group)) %>% 
+  mutate(group = factor(group, levels = names(group9_col)))
+
+vn_eigen <- vn_pcoa_proj$eig
+vn_pcoa_proj %>% 
+  arrange(desc(group)) %>% 
+  ggplot() +
+  geom_point(aes(x = PC1, y = PC2, color = group, shape = group), size = 5) +
+  # geom_text(aes(x = PC1, y = PC2, label = label, color = group)) +
+  xlab(paste0("PC1 (", format(vn_eigen[1]/sum(vn_eigen)*100, digits = 2), "%)")) +
+  ylab(paste0("PC2 (", format(vn_eigen[2]/sum(vn_eigen)*100, digits = 2), "%)")) +
+  scale_color_manual(values = group9_col) + 
+  scale_shape_manual(values = 0:8) +
+  theme_minimal() + 
+  theme(panel.border = element_rect(color = "gray", fill = NA),
+        axis.title = element_text(size = 12))
+```
+
+
+
+
+## Genetic structure of all the Congolese-related individuals (both reference and VN)
+
+```{r}
+cg_inds <- all_snmf_prop %>% 
+  filter(ancestry == "V2",
+         proportion > 0.8)
+
+cg_geno <- all_geno[which(rownames(all_geno) %in% cg_inds$code),]
+dim(cg_geno)
+cg_dist <- dist(cg_geno)
+cg_hclust <- hclust(cg_dist, method = "ward.D")
+plot(cg_hclust)
+
+cg_tree <- nj(cg_dist)
+
+ggtree(cg_tree, ladderize = T) +
+  geom_tiplab(hjust = 1,  align = F, linesize = .2, nudge_x = .2, size = 2)
+
+ggtree(cg_tree, ladderize = T, layout = "ape") +
+  geom_tiplab()
+```
+
+
+```{r}
+pca_dir <- "./pca_data"
+dir.create(pca_dir, showWarnings = F)
+
+cg_lfmm_file <- file.path(pca_dir, "cg.lfmm")
+write.lfmm(cg_geno, cg_lfmm_file)
+
+cg_pca <- pca(cg_lfmm_file)
+
+cg_pca_proj <- data.frame("code" = rownames(cg_geno),
+                           "PC1" = cg_pca$projections[,1],
+                           "PC2" = cg_pca$projections[,2],
+                           "PC3" = cg_pca$projections[,3])
+eigen <- cg_pca$eigenvalues[,1]
+
+cg_pca_proj %>% 
+  ggplot() +
+  geom_text(aes(x = PC1, y = PC2, label = code)) +
+  xlab(paste0("PC1 (", format(eigen[1]/sum(eigen)*100, digits = 2), "%)")) +
+  ylab(paste0("PC2 (", format(eigen[2]/sum(eigen)*100, digits = 2), "%)")) +
+  scale_color_manual(values = c(turbo(8), "gray50")) + 
+  theme_minimal() +
+  scale_x_reverse()
+
+
+cg_pca_proj %>% 
+  ggplot() +
+  geom_text(aes(x = PC1, y = PC3, label = code)) +
+  xlab(paste0("PC1 (", format(eigen[1]/sum(eigen)*100, digits = 2), "%)")) +
+  ylab(paste0("PC3 (", format(eigen[3]/sum(eigen)*100, digits = 2), "%)")) +
+  scale_color_manual(values = c(turbo(8), "gray50")) + 
+  theme_minimal() +
+  scale_x_reverse()
+```
+
+
+### new reference set
+```{r}
+old_ref <- ref_info %>% filter(data == "sequencing") %>% pull(code)
+new_ref <- info %>% filter(grepl("BC54|S/BIL4|20716_k|20724_k|20695_k", code)) %>% pull(code)
+new_ref <- c(old_ref, new_ref)
+new_ref_geno <- geno[which(geno$code %in% c(new_ref, "M1413_hb", "Can34_hb")),]
+rownames(new_ref_geno) <- NULL
+new_ref_geno <- new_ref_geno %>% 
+  as.data.frame() %>% 
+  column_to_rownames("code")
+rownames(new_ref_geno)[grepl("20716", rownames(new_ref_geno))] <- "C-127_C"
+rownames(new_ref_geno)[grepl("20724", rownames(new_ref_geno))] <- "C-133_A"
+rownames(new_ref_geno)[grepl("20695", rownames(new_ref_geno))] <- "C-147_A"
+rownames(new_ref_geno)[grepl("BC54", rownames(new_ref_geno))] <- "D-7_C"
+rownames(new_ref_geno)[grepl("S/BIL4", rownames(new_ref_geno))] <- "D-8_D"
+```
+
+```{r}
+newref_lfmm_file <- file.path(pca_dir, "new_ref.lfmm")
+write.lfmm(new_ref_geno, newref_lfmm_file)
+
+new_ref_pca <- pca(newref_lfmm_file)
+
+nr_pca_proj <- data.frame("code" = rownames(new_ref_geno),
+                           "PC1" = new_ref_pca$projections[,1],
+                           "PC2" = new_ref_pca$projections[,2],
+                           "PC3" = new_ref_pca$projections[,3])
+nr_eigen <- new_ref_pca$eigenvalues[,1]
+
+nr_pca_proj %>% 
+  mutate(group = gsub(".+_", "", code)) %>% 
+  mutate(group = factor(group, levels = c("A", "B", "C", "D", "E", "G", "O", "R", "hb"))) %>% 
+  ggplot() +
+  geom_text(aes(x = PC1, y = PC2, label = group, color = group), show.legend = F) +
+  xlab(paste0("PC1 (", format(nr_eigen[1]/sum(nr_eigen)*100, digits = 2), "%)")) +
+  ylab(paste0("PC2 (", format(nr_eigen[2]/sum(nr_eigen)*100, digits = 2), "%)")) +
+  # scale_color_manual(values = c(turbo(8), "gray50")) + 
+  theme_minimal() +
+  scale_x_reverse()
+
+
+nr_pca_proj %>% 
+  mutate(group = gsub(".+_", "", code)) %>% 
+  ggplot() +
+  geom_text(aes(x = PC1, y = PC3, label = group, color = group)) +
+  xlab(paste0("PC1 (", format(nr_eigen[1]/sum(nr_eigen)*100, digits = 2), "%)")) +
+  ylab(paste0("PC3 (", format(nr_eigen[3]/sum(nr_eigen)*100, digits = 2), "%)")) +
+  # scale_color_manual(values = c(turbo(8), "gray50")) + 
+  theme_minimal() +
+  scale_x_reverse()
+```
+
+# map of reference
+
+```{r}
+library(sf)
+library(rnaturalearth)
+library(rnaturalearthdata)
+```
+
+```{r}
+africa <- ne_countries(scale = "medium", continent = "africa", returnclass = "sf")
+
+
+africa <- africa %>% 
+  mutate(ancestry = case_when(sovereignt %in% c("Ivory Coast", "Guinea", "Ghana") ~ "D",
+                              sovereignt == "Cameroon" ~ "C",
+                              sovereignt %in% c("Gabon", "Benin", "Angola") ~ "AG",
+                              sovereignt %in% c("Uganda", "Central African Republic") ~ "OB",
+                              sovereignt == "Democratic Republic of the Congo" ~ "ER"))
+
+rob_countries <- africa %>% filter(!is.na(ancestry))
+
+ggplot(data = africa) +
+  geom_sf(fill = "white", color = "grey") +
+  # geom_sf(data = rob_countries, aes(fill = ancestry), color = "grey") +
+  # geom_sf_text(data = rob_countries, aes(label = abbrev), color = "grey50") +
+  geom_point(data = acc_info, aes(x = long, y = lat, color = group), size = 5) +
+  scale_color_manual(values = group9_col, na.value = "grey50") +
+  coord_sf(xlim = c(-15, 35), ylim = c(-18, 13), expand = TRUE) +
+  theme_void() +
+  theme(legend.box.margin = margin(l = 20), 
+        legend.key.size = unit(14, "pt"),
+        legend.key.height = unit(15, "pt"))
+
+```
+
