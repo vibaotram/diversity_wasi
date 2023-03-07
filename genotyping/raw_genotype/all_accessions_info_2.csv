@@ -1,0 +1,245 @@
+code	prior_group	data	name	collection	country	pop	lat	long	group	platform	other_name
+BUD15	O	seq	BU-D15	Alex	Ug	Budango	1.915651	31.725715	O	Cornell	
+20504	R	seq	20504	CNRA	RCA	Doungba	5.067	20.675	E	BGI	
+BGQ06	NA	seq	935	Meise	Angola	Santa Cruz	-6.91667	16.35	hb	NIHS	
+Can33	O	seq	Can33	Meise	RDC	Epulu	1.39855	28.56766667	B	NIHS	
+20803	D	seq	20803	CNRA	Guinea	Piné	8.57	-8.06	D	NIHS	
+29054	C	seq	29054	CNRA	RCA	Ndongue	5.485614	15.510499	C	NIHS	
+ZK2_5	O	seq	ZK2-5	NARO	Ug	Zoka	3.131636094	31.65631864	B	NIHS	
+MB3_1	O	seq	MB3-1	NARO	Ug	Mabira	-0.87633161078526	31.7569337492095	O	NIHS	
+M1413	G	seq	M_1413	Meise	RDC	Gimbi	-5.51666666666666	13.3666666666666	hb	NIHS	
+Can34	NA	seq	Can34	Meise	RDC	Epulu	1.65944444444444	28.6413888888888	hb	NIHS	
+20233	D	seq	20233	CNRA	CI	Fouroubankoro	8.29	-5.45	D	NIHS	
+20516	E	seq	20516	CNRA	RCA	Yombi	3.892123	18.45078	E	NIHS	
+BD5_1	O	seq	BD5-1	NARO	Ug	Budongo	1.63725739915758	31.4073512256068	O	NIHS	
+MB5_5	O	seq	MB5-5	NARO	Ug	Mabira	0.468134473673642	32.9105519726725	O	NIHS	
+BGQ07	A	seq	111	Meise	Gabon	PN Loango	-2.041333	9.537499	A	NIHS	
+Can12	NA	seq	Can12	Meise	RDC	Epulu	1.64111111111111	28.6083333333333	hb	NIHS	
+20683	C	seq	20683	CNRA	Cameroon	Nguilili	2.06	15.6	C	NIHS	
+KB2_1	O	seq	KB2-1	NARO	Ug	Kibale	0.48149183772995	30.4364210469026	O	NIHS	
+BP409	R	seq	BP409	ICCRI	Indonesia	NA	NA	NA	E	NIHS	
+M1400	E	seq	M_1400	Meise	RDC	Lusambo	-4.966667	23.433333	E	NIHS	
+BGQ08	C	seq	1765	Meise	RCA	Sangha	2.35	16.15	C	NIHS	
+20245	D	seq	20245	CNRA	CI	Marahoue	7.11	-6.04	D	NIHS	
+20726	E	seq	20726	CNRA	Congo	SouankeGabon	2.07	14	E	NIHS	
+IT1_1	O	seq	IT1-1	NARO	Ug	Itwara	0.820386404735189	30.4343283800416	O	NIHS	
+M1361	O	seq	M_1361	Meise	RDC	Balo, Lac Albert	1.566667	30.533333	O	NIHS	
+BGQ09	NA	seq	282	Meise	Cameroon	Moliwé	4.058611	9.228055	E	NIHS	
+20121	D	seq	20121	CNRA	CI	Gbapleu	7.34	-8.18	D	NIHS	
+ML5_1	O	seq	ML5-1	NARO	Ug	Malabigambo	-0.911630009521838	31.5971782995545	O	NIHS	
+BGQ21	B	seq	Nt Core 825	Meise	RDC	Yangambi	0.805	24.5	B	NIHS	
+C031GQ23	B	seq	Ramasoni3	Meise	RDC	Isalowe	0.805	24.5	B	NIHS	
+Can36	O	seq	Can36	Meise	RDC	Epulu	1.3667	28.55	B	NIHS	
+2931	D	seq	2931	CNRA	CI	Moniadougou	7.921969	-6.702433	D	NIHS	
+20738	E	seq	20738	CNRA	Congo	Impfondo Dongou 1	1.586662	17.845006	E	NIHS	
+ML3_3	O	seq	ML3-3	NARO	Ug	Malabigambo	-0.876476369194056	31.7570415294463	O	NIHS	
+BGQ02	NA	seq	110	Meise	RDC	Yangambi	0.81667	24.53333	O	NIHS	
+BGQ10	D	seq	2239	Meise	Ghana	Bia NP	6.389999	-3.004722	D	NIHS	
+20685	C	seq	20685	CNRA	Cameroon	Bombi	4.93	13.5	C	NIHS	
+20656	C	seq	20656	CNRA	Cameroon	Nguila	4.716	11.66	C	NIHS	
+KL1_2	E	seq	KL1-2	NARO	Ug	Kalangala	-0.313303072621806	32.3011436574356	O	NIHS	
+29004	C	seq	29004	CNRA	RCA	Ndongue	5.485614	15.510499	C	NIHS	
+20852	E	seq	20852	CNRA	Guinea	Kouyo	8.5	-10.516667	E	NIHS	
+20662	R	seq	20662	CNRA	Cameroon	Mwamepen	3.29	14.48	E	NIHS	
+KL5_2	E	seq	KL5-2	NARO	Ug	Kalangala	-0.277630537951889	32.1398649409645	O	NIHS	
+20135	D	seq	20135	CNRA	CI	Gao	6.57	-7.39	D	MGX	
+20159	D	seq	20159	CNRA	CI	Ira2	7.5	-7.42	D	MGX	
+20511	B	seq	20511	CNRA	RCA	Doungba	5.067414	20.674931	B	MGX	
+20650	E	seq	20650	CNRA	Cameroon	Koto	4.22	9.34	E	MGX	
+20658	C	seq	20658	CNRA	Cameroon	Nguila	4.716	11.66	C	MGX	
+20708	A	seq	20708	CNRA	Togo	Niaouli	NA	NA	A	MGX	
+20723	A	seq	20723	CNRA	Congo	SembeSouanke 	1.933	14.183	A	MGX	
+20731	E	seq	20731	CNRA	Congo	Boyele 5	2.211619	17.899349	E	MGX	
+Boim_7	G	seq	Boim7	INCA	Angola	Anboim	-10.026258	14.191458	G	NIHS	
+Briz_2	G	seq	Briz2	INCA	Angola	Ambriz	-8.179469	14.224086	G	NIHS	
+K4Y17Y2	R	seq	K4Y17Y2	ICCRI	RDC	Sankuru	-2.677827	24.334999	R	MGX	
+Amboim01_array	G										
+Amboim02_array	G										
+Amboim04_array	G										
+Amboim05_array	G										
+Amboim08_array	G										
+Amboim09_array	G										
+Amboim10_array	G										
+Ambriz01_array	G										
+Ambriz03_array	G										
+Ambriz04_array	G										
+Ambriz05_array	G										
+Ambriz06_array	G										
+Ambriz07_array	G										
+Ambriz08_array	G										
+Ambriz09_array	G										
+AnaMaria02_array	G										
+AnaMaria03_array	G										
+AnaMaria04_array	G										
+AnaMaria05_array	G										
+AnaMaria07_array	G										
+AnaMaria08_array	G										
+AnaMaria09_array	G										
+20715_array	A										
+20502_array	B										
+CNRA4A3_array	A										
+D12_1_L11_2_array	D										
+D12_11_L29_15_array	C										
+K5_73_4_array	R										
+K6_38_4_array	R										
+K4_28_4_array	R										
+K9_34_3_array	A										
+BD2_2_array	O										
+BD3_1_array	O										
+BD3_2_array	O										
+BD4_5_array	O										
+BD5_2_array	O										
+BD5-4_array	O										
+IT2_1_array	O										
+IT3_1_array	O										
+IT3_4_array	O										
+IT4_1_array	O										
+IT5_1_array	O										
+KB1_4_array	O										
+KB1_5_array	O										
+KB2_4_array	O										
+KB3_1_array	O										
+KB4_1_array	O										
+KB4-4_array	O										
+ML6_3_array	O										
+ZK2_1_array	O										
+ZK2_4_array	O										
+ZK3_3_array	O										
+ZK4_3_array	O										
+ZK4_5_array	O										
+ZK5_1_array	O										
+FRT81_array	A										
+FRT83_array	A										
+20145_kasp	D										
+20336_kasp	D										
+20354_kasp	D										
+20362_kasp	D										
+20366_kasp	D										
+20395_kasp	D										
+20406_kasp	D										
+20716_kasp	C										
+20724_kasp	A										
+20725_kasp	A										
+20693_kasp	A										
+20695_kasp	A										
+20555_kasp	B										
+20583_kasp	B										
+20667_kasp	C										
+20319_kasp	E										
+TR10m	Vietnam										
+TR11m	Vietnam										
+TR12m	Vietnam										
+TR13m	Vietnam										
+TR14m	Vietnam										
+TR15m	Vietnam										
+TR4m	Vietnam										
+TR5m	Vietnam										
+TR6m	Vietnam										
+TR9m	Vietnam										
+S-1	Vietnam										
+S-2	Vietnam										
+S-3	Vietnam										
+S-4	Vietnam										
+S-5	Vietnam										
+S-6	Vietnam										
+S-7	Vietnam										
+S-8	Vietnam										
+S-9	Vietnam										
+S-10	Vietnam										
+S-11	Vietnam										
+S-12	Vietnam										
+S-13	Vietnam										
+S-14	Vietnam										
+S-15	Vietnam										
+S-16	Vietnam										
+S-17	Vietnam										
+S-18	Vietnam										
+S-19	Vietnam										
+S-20	Vietnam										
+S-21	Vietnam										
+S-22	Vietnam										
+S-23	Vietnam										
+S-24	Vietnam										
+S-25	Vietnam										
+S-26	Vietnam										
+S-27	Vietnam										
+S-28	Vietnam										
+S-29	Vietnam										
+S-30	Vietnam										
+S-31	Vietnam										
+S-32	Vietnam										
+S-33	Vietnam										
+S-34	Vietnam										
+S-36	Vietnam										
+S-37	Vietnam										
+S-38	Vietnam										
+S-39	Vietnam										
+S-40	Vietnam										
+S-41	Vietnam										
+S-45	Vietnam										
+S-46	Vietnam										
+S-47	Vietnam										
+S-48	Vietnam										
+S-49	Vietnam										
+S-50	Vietnam										
+S-51	Vietnam										
+S-52	Vietnam										
+S-58	Vietnam										
+S-62	Vietnam										
+S-63	Vietnam										
+S-64	Vietnam										
+S-65	Vietnam										
+S-66	Vietnam										
+S-67	Vietnam										
+S-68	Vietnam										
+S-69	Vietnam										
+S-70	Vietnam										
+S-71	Vietnam										
+S-72	Vietnam										
+S-73	Vietnam										
+S-74	Vietnam										
+S-75	Vietnam										
+S-76	Vietnam										
+S-77	Vietnam										
+S-78	Vietnam										
+S-79	Vietnam										
+S-80	Vietnam										
+S-81	Vietnam										
+S-82	Vietnam										
+S-83	Vietnam										
+S-84	Vietnam										
+S-85	Vietnam										
+S-86	Vietnam										
+S-87	Vietnam										
+S-88	Vietnam										
+S-89	Vietnam										
+S-90	Vietnam										
+S-91	Vietnam										
+S-92	Vietnam										
+S-93	Vietnam										
+S-94	Vietnam										
+S-95	Vietnam										
+S-96	Vietnam										
+S-97	Vietnam										
+S-98	Vietnam										
+S-99	Vietnam										
+S-100	Vietnam										
+S-101	Vietnam										
+S-102	Vietnam										
+S-103	Vietnam										
+S-104	Vietnam										
+S-105	Vietnam										
+S-106	Vietnam										
+S-120	Vietnam										
+S-121	Vietnam										
+S-122	Vietnam										
+S-123	Vietnam										
+S-134	Vietnam										
+S-135	Vietnam										
+S-136	Vietnam										
+S-137	Vietnam										
+S-139	Vietnam										
+S-140	Vietnam										
+S-141	Vietnam										
+S-142	Vietnam										
+S-143	Vietnam										

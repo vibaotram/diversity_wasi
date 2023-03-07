@@ -24,7 +24,6 @@ reference/*
 **/R_data/*
 accessions/*
 **/*pcaProject
-raw_genotype
 **/*.snmf*
 **/*.RData
 **/*.pca
@@ -41,3 +40,4 @@ raw_genotype
 **/*.snp
 **/*.cpp
 genotyping/kinship/*
+raw_genotype.db
