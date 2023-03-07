@@ -35,7 +35,6 @@ raw_genotype
 **/*.svg
 **/*.geno
 **/*.tiff
-**/*.tsv
 **/*.txt
 **/*.fasta
 **/*.bed
