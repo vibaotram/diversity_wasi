@@ -496,7 +496,7 @@ ancestry_ord6 <- all_snmf_prop %>%
 anc_cols <- group9_col
 names(anc_cols) <- 1:9
 
-tiff(filename = file.path(plotdir, "snmf_.tiff"),
+tiff(filename = file.path(plotdir, "snmf_6.tiff"),
      width = 14, height = 7, units = "in", res = 1200)
 all_snmf_prop6 <- all_snmf_prop %>% 
   left_join(., ancestry_ord6, by = "ancestry") %>% 
@@ -1112,10 +1112,9 @@ africa <- africa %>%
                               sovereignt %in% c("Uganda", "Central African Republic") ~ "OB",
                               sovereignt == "Democratic Republic of the Congo" ~ "ER"))
 
-rob_countries <- africa %>% filter(!is.na(ancestry))
 
 ggplot(data = africa) +
-  geom_sf(fill = "white", color = "grey") +
+  geom_sf(fill = "white", color = "grey20") +
   # geom_sf(data = rob_countries, aes(fill = ancestry), color = "grey") +
   # geom_sf_text(data = rob_countries, aes(label = abbrev), color = "grey50") +
   geom_point(data = acc_info, aes(x = long, y = lat, color = group), size = 5) +
@@ -1126,5 +1125,173 @@ ggplot(data = africa) +
         legend.key.size = unit(14, "pt"),
         legend.key.height = unit(15, "pt"))
 
+
 ```
 
+```{r}
+afmap <- ggplot(data = africa) +
+  geom_sf(fill = "white", color = "grey20", size = 5) +
+  coord_sf(xlim = c(-15, 35), ylim = c(-18, 13), expand = TRUE) +
+  theme_void() +
+  theme(legend.box.margin = margin(l = 20), 
+        legend.key.size = unit(14, "pt"),
+        legend.key.height = unit(15, "pt"))
+
+
+```
+
+
+```{r}
+group_coord <- acc_info %>% 
+  filter(!is.na(long)) %>% 
+  group_by(group) %>% 
+  summarise(x_mean = mean(long),
+            y_mean = mean(lat))
+group_coord$x_mean[group_coord$group == "A"] <- 10
+group_coord$x_mean[group_coord$group == "A"] <- 10
+
+rob_countries_names <- c("Ivory Coast", "Cameroon", "Angola", 
+                         "Gabon", "Central African Republic",
+                         "Uganda", "Democratic Republic of the Congo")
+rob_countries <- africa %>% filter(sovereignt %in% rob_countries_names)
+
+group_coord <- sp::coordinates(as(rob_countries, "Spatial"))
+group_coord <- as.data.frame(rbind(group_coord, c(group_coord[5,1] + 3, group_coord[5,2])))
+group_coord[,3] <- c("G", "B", "D", "C", "E", "A", "O", "R")
+colnames(group_coord) <- c("x_mean", "y_mean", "group")
+```
+
+```{r}
+group_coord <- sp::coordinates(as(rob_countries, "Spatial")) %>% as.data.frame()
+group_coord[,3] <- c("G", "B", "D", "C", "ER", "A", "O")
+colnames(group_coord) <- c("x_mean", "y_mean", "group")
+ran_grp <- do.call(rbind, lapply(1:nrow(group_coord), function(i) {
+  ran_pts <- data.frame(x_mean = runif(100, 0.00, 5.00) * sample(c(-1, 1), 1) + group_coord[i,1], 
+                        y_mean = runif(100, 0.00, 3.00) * sample(c(-1, 1), 1) + group_coord[i,2],
+                        group = group_coord[i,3])
+}))
+group6_col <- group9_col[-c(7, 9)]
+group6_col["B"] <- group6_col["O"]
+names(group6_col)[7] <- "ER"
+
+
+```
+
+
+```{r}
+pop_annot <- lapply(names(group9_col)[-9], function(i) {
+  gt_plot <- ggplotGrob(
+    ggplot(all_snmf_prop6 %>% filter(group == i)) +
+      geom_col(aes(x = code, y = proportion, fill = as.factor(new_ancestry)), 
+             width = 1, show.legend = F) +
+      scale_fill_manual(values = anc_cols) +
+      theme_void() +
+      theme(plot.title = element_text(hjust = 0.5) #,
+            # axis.title = element_blank(),
+            # axis.text = element_blank(),
+            # # axis.text.y = element_text(size = 5),
+            # # axis.ticks.length.y = unit(1, "points"),
+            # axis.ticks = element_blank(),
+            # panel.spacing = unit(0, "in"),
+            # plot.background = element_rect(color = "white"),
+            # panel.grid = element_blank()
+            ) +
+      scale_y_continuous(expand = c(0, 0)) +
+      ggtitle(i) 
+    )
+    
+  x_min <- group_coord$x_mean[group_coord$group == i]
+  y_min <- group_coord$y_mean[group_coord$group == i]
+  annotation_custom(gt_plot,
+                      xmin = x_min - nrow(all_snmf_prop6 %>% filter(group == i)) *.02,
+                      xmax = x_min + nrow(all_snmf_prop6 %>% filter(group == i)) *.02,
+                      ymin = y_min - 2,
+                      ymax = y_min + 4)
+})
+
+afmap + 
+  pop_annot
+```
+
+```{r}
+ggplot(data = africa) +
+  geom_sf(fill = "white", color = "grey20", size = 5) +
+  coord_sf(xlim = c(-15, 35), ylim = c(-18, 13), expand = TRUE) +
+  geom_point(data = group_coord,
+            aes(x = x_mean, y = y_mean, fill = group, color = group, size = group),
+            alpha = 0.2, shape = 21, show.legend = F) +
+  geom_text(data = group_coord,
+            aes(x = x_mean, y = y_mean,
+                label = group, color = group),
+            size = 10, show.legend = F) +
+  # stat_density_2d(data = ran_grp, 
+  #                 aes(x = x_mean, y = y_mean,
+  #                     alpha = ..level.., fill = group),
+  #                 geom = "polygon") +
+  # geom_density2d(data = ran_grp,
+  #                aes(x = x_mean, y = y_mean, color = group, fill = group),
+  #                contour_var = "density") +
+  theme_void() +
+  theme(legend.box.margin = margin(l = 20), 
+        legend.key.size = unit(14, "pt"),
+        legend.key.height = unit(15, "pt")) +
+  scale_color_manual(values = group6_col) +
+  scale_fill_manual(values = group6_col) + 
+  scale_size_manual(values = c(25, 25, 25, 25, 50, 20, 20))
+```
+
+
+```{r}
+ggplot(all_snmf_prop6 %>% filter(group != "Vietnam")) +
+  facet_grid(cols = vars(group),
+             scales = "free", space = "free") +
+  geom_col(aes(x = code, y = proportion, fill = as.factor(new_ancestry)), 
+           width = 1, show.legend = F) +
+  theme(axis.text.x = element_blank(),
+        axis.title.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        panel.background = element_rect(fill = "white"), 
+        panel.grid = element_blank(),
+        strip.background = element_blank(),
+        strip.text = element_text(size = 12),
+        axis.title = element_text(size = 12),
+        panel.border = element_rect(fill = NA, color = "gray", size = 1),
+        panel.spacing.y = unit(0.04, "npc"),
+        panel.spacing.x = unit(0.01, "npc")) +
+  scale_fill_manual(values = anc_cols) +
+  xlab("Individual") +
+  ylab("Ancestry proportion") +
+  scale_y_continuous(expand = c(0, 0))
+```
+
+
+```{r}
+ggplot(all_snmf_prop6 %>% filter(group == "Vietnam")) +
+  geom_col(aes(x = code, y = proportion, fill = as.factor(new_ancestry)), 
+         width = 1, show.legend = F) +
+  scale_fill_manual(values = anc_cols) +
+  theme(axis.text.x = element_blank(),
+    axis.title.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    panel.background = element_rect(fill = "white"), 
+    panel.grid = element_blank(),
+    strip.background = element_blank(),
+    strip.text = element_text(size = 12),
+    axis.title = element_text(size = 12),
+    panel.border = element_rect(fill = NA, color = "gray", size = 1),
+    panel.spacing.y = unit(0.04, "npc"),
+    panel.spacing.x = unit(0.01, "npc"),
+    plot.title = element_text(hjust = 0.5)) +
+  scale_fill_manual(values = anc_cols) +
+  xlab("Individual") +
+  ylab("Ancestry proportion") +
+  scale_y_continuous(expand = c(0, 0)) +
+  ggtitle("Vietnam")
+```
+
+
+```
+some instructions to color map background based on point density
+https://static-content.springer.com/esm/art%3A10.1038%2Fs41467-018-08272-w/MediaObjects/41467_2018_8272_MOESM1_ESM.pdf
+http://membres-timc.imag.fr/Olivier.Francois/tutoRstructure.pdf
+```
