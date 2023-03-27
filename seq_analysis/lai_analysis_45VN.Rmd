@@ -1,0 +1,743 @@
+---
+title: "LAI analysis of the core Vietnamese Robusta collection"
+author: "Tram"
+date: "6/21/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(LEA)
+library(Rsamtools)
+library(tidyverse)
+library(viridis)
+library(Rcpp)
+library(data.table)
+library(karyoploteR)
+library(gt)
+library(gridExtra)
+library(ggpubr)
+```
+
+# copy elai results from IFB to Itrop
+```{bash}
+rsync -vaurP baotram@core.cluster.france-bioinformatique.fr:/shared/projects/elai_most/data/snakelai_out_all/elai_results /data/projects/rob/data/most_elai/elai_out/
+rsync -vaurP baotram@core.cluster.france-bioinformatique.fr:/shared/projects/elai_most/data/snakelai_out_all/source /data/projects/rob/data/most_elai/elai_out/
+rsync -vaurRP baotram@core.cluster.france-bioinformatique.fr:/shared/projects/elai_most/data/snakelai_out_all/./pos/CC1.8.Chr01/even/test_1.pos /data/projects/rob/data/most_elai/elai_out/
+```
+
+```{r}
+elai_outdir <- "/data/projects/rob/data/most_elai/elai_out"
+source_dir <- file.path(elai_outdir, "source")
+plot_dir <- "/data/projects/rob/data/most_elai/plots"
+```
+
+# list of individuals
+```{r}
+# vcf_file <- list.files(source_dir, "CC1.8.Chr07.recode.vcf", recursive = T, full.names = T)
+vcf_header <- scanBcfHeader("/data/projects/rob/data/most_snp_2021/all_final_thin5000_maf002.recode.vcf")
+vcf_names <- vcf_header[[1]]@listData$Sample
+```
+
+```{r}
+info_file <- "/data/projects/rob/data/most_elai/snps_data/sequence_info_final.tsv"
+ind_info <- read.delim(info_file)
+ind_names <- sapply(ind_names, function(i) 
+  ifelse(any(grepl(i, ind_info$Label)), 
+         grep(i, ind_info$Label, value = T),
+         i),
+  USE.NAMES = F)
+```
+
+
+
+# combine elai sets
+
+
+```{r}
+all_chr <- GRanges()
+all_chr <- do.call(GRangesList, sapply(1:11, function(i) {
+  chr <- readRDS(paste0("/data/projects/rob/data/most_elai/merged_elai/chrom_", sprintf("%02d", i), ".RDS"))
+  return(chr)
+}, simplify = T)) %>% unlist
+seqlevels(all_chr) <- gsub("CC1.8.Chr", "Chr ", seqlevels(all_chr))
+all_chr$individual <- gsub(".", "-", all_chr$individual, fixed = T)
+all_chr$individual <- gsub("m", "", all_chr$individual, fixed = T)
+```
+
+
+```{r}
+all_windows_large <- all_chr[width(all_chr) > 1e6,]
+```
+
+```{r}
+group_col <- c("#30123BFF", "#28BBECFF", "#A2FC3CFF", "#FB8022FF", "#7A0403FF")
+names(group_col) <- c("ER", "OB", "C", "AG", "D")
+
+# genome
+genome_fa <- "/data3/projects/vietcaf/reference/CC1.8_v2_pseudomolecule_cat.fa"
+genome <- scanFa(genome_fa)
+genome <- genome[grepl("Chr", names(genome))] # remove contigs
+names(genome) <- gsub(" .+", "", names(genome))
+names(genome) <- gsub("CC1.8.Chr", "Chr ", names(genome))
+genome_GR <- GRanges(seqnames = names(genome), ranges = IRanges(start = 1, end = width(genome)))
+```
+
+
+```{r}
+plot_dir <- "./plots"
+# plot each individual separately
+for (id in unique(all_chr$individual)) {
+  all_windows_ind <- all_chr[all_chr$individual == id]
+  all_windows_large <- all_windows_ind[width(all_windows_ind) > 1e6,]
+  # all_windows_small <- all_windows_ind[width(all_windows_ind) < 1e6,]
+  groups <- colnames(mcols(all_chr))[colnames(mcols(all_chr)) != "individual"]
+  
+  pp1 <- getDefaultPlotParams(plot.type=6)
+  pp1$data1height <- 5
+  pp1$data2height <- 5
+  pp1$topmargin <- 20
+  pp1$bottommargin <- 20
+  pp1$leftmargin <- .07
+  pp1$rightmargin <- .15
+  
+  tiff(file.path(plot_dir, paste0(gsub("\\.", "_", id), ".tiff")),
+     width = 11, heigh = 6, unit = "in", res = 1000)
+  par(mar = c(2,2,2,2))
+  gkp <- plotKaryotype(genome = genome_GR, plot.type = 6,
+                       plot.params = pp1, main = gsub("\\.", "-", id)) 
+  kpDataBackground(gkp, data.panel ="ideogram", color = "grey90")
+  kpAddBaseNumbers(gkp, tick.dist = 1e7)
+  for (g in 1:length(groups)) {
+    if (g == 1) {
+      ga <- 0
+      gz <- mcols(all_windows_large)[,groups[g]]
+    } else {
+      ga <- gz
+      gz <- gz+mcols(all_windows_large)[,groups[g]]
+    }
+    kpBars(gkp, data = all_windows_large, y0 = ga, y1 = gz, col = group_col[groups[g]], border = NA)
+  }
+  kpAxis(gkp, side = 2, data.panel=1, cex = 0.7)
+  legend("right", #x = 0.9, y = 0.4, #"bottomright", #  yjust = .5, xjust = 0, # 
+         title = "ancestry", legend = c(gsub("group_", "", names(group_col)), "undetermined"), 
+         fill = c(group_col, "grey90"), bty = "n", xjust = 0)
+  dev.off()
+}
+
+
+
+```
+
+
+## summary table for overall proportion
+```{r}
+## summary table for overall proportion
+
+global <- do.call(rbind, lapply(unique(all_windows_large$individual), function(i) {
+  # cat("> individual:", i, "\n")
+  all_windows_ind <- all_windows_large[all_windows_large$individual == i,]
+  all_windows_ind <- all_windows_ind[width(all_windows_ind) > 1e6]
+  grps <- mcols(all_windows_ind) %>% as.data.frame() %>% dplyr::select(-individual) %>% colnames()
+  glob_adm <- do.call(rbind, lapply(grps, function(g) {
+    pw <- sum(mcols(all_windows_ind)[,g]*width(all_windows_ind))/sum(width(genome_GR))
+    return(pw)
+  }))
+  glob_adm <- as.data.frame(t(glob_adm))
+  colnames(glob_adm) <- grps
+  rownames(glob_adm) <- i
+  return(glob_adm)
+}))
+
+global <- global[stringr::str_sort(rownames(global), numeric = T), stringr::str_sort(colnames(global))]
+undetermined <- 1 - rowSums(global)
+global$undetermined <- undetermined
+colnames(global) <- gsub("group_", "ancestry ", colnames(global))
+rownames(global) <- gsub("m", "", rownames(global))
+rownames(global) <- gsub("\\.", "-", rownames(global))
+
+t <- global %>% 
+  as.data.frame() %>% 
+  gt(rownames_to_stub = T) %>% 
+  fmt_number(columns = everything(), decimals = 3) %>% 
+  data_color(colors = scales::col_numeric(palette = c("white", group_col["AG"]), domain = c(0,1)),
+             columns = "AG") %>% 
+  data_color(colors = scales::col_numeric(palette = c("white", group_col["ER"]), domain = c(0,1)),
+             columns = "ER") %>% 
+  data_color(colors = scales::col_numeric(palette = c("white", group_col["OB"]), domain = c(0,1)),
+             columns = "OB") %>% 
+  data_color(colors = scales::col_numeric(palette = c("white", group_col["D"]), domain = c(0,1)),
+             columns = "D") %>% 
+  data_color(colors = scales::col_numeric(palette = c("white", group_col["C"]), domain = c(0,1)),
+             columns = "C") %>% 
+  data_color(colors = scales::col_numeric(palette = c("white", "black"), domain = c(0,1)),
+             columns = "undetermined") 
+gtsave(t, file.path(plot_dir, "global_ancestry_elai.pdf"))
+gt <- as_ggplot(t, vwidth = 2400, vheight = 2000)
+```
+
+
+## correlation between lai and snmf global inference
+```{r}
+snmfPrj <- "./snmf/thin_all.snmfProject"
+all_snmf <- load.snmfProject(snmfPrj)
+k <- 5
+snmf_prop <- Q(all_snmf, k, 
+               run = which.min(cross.entropy(all_snmf, k)))
+colnames(snmf_prop) <- c("C", "OB", "ER", "AG", "D")
+snmf_glob <- snmf_prop %>% 
+  as.data.frame() %>% 
+  mutate(id = gsub("m$", "", vcf_names)) %>% 
+  filter(grepl("(S-|TR)", id)) %>% 
+  pivot_longer(cols = -id, names_to = "ancestry", values_to = "snmf")
+
+elai_glob <- global %>% 
+  rownames_to_column("id") %>% 
+  select(-undetermined) %>% 
+  pivot_longer(cols = -id, names_to = "ancestry", values_to = "elai")
+
+merge(snmf_glob, elai_glob) %>% 
+  group_by(id) %>%
+  summarise(id_correlation = cor(snmf, elai, method = "pearson")) %>% 
+  summarise(correlation = mean(id_correlation)) ## result: 0.972
+```
+
+
+## plot all genomes admixed with AG > 10%
+
+```{r}
+# plot all genomes admixed with AG > 10%
+pp2 <- getDefaultPlotParams(plot.type=7)
+pp2$data1outmargin <- 0
+# pp2$data1height <- 5
+# pp2$data2height <- 5
+pp2$topmargin <- 40
+# pp2$bottommargin <- 20
+pp2$leftmargin <- .07
+pp2$rightmargin <- .2
+pp2$ideogramlateralmargin <- 0.003
+
+inds_AG <- rownames(global)[global$AG > .1 & global$D < 0.1 & global$OB < 0.03]
+# inds_AG <- gsub("-", "\\.", inds_AG)
+# inds_AG <- gsub("TR6", "TR6m", inds_AG)
+
+
+tiff(file.path(plot_dir, "all_AG.tiff"),
+     width = 20, heigh = 6, unit = "in", res = 1000)
+par(mar = c(2,2,2,2))
+gkp <- plotKaryotype(genome = genome_GR, plot.type = 7,
+                     plot.params = pp2)
+kpDataBackground(gkp, data.panel ="ideogram", color = "white")
+kpAddBaseNumbers(gkp, tick.dist = 1e7)
+for (id in 1:length(inds_AG)) {
+  if (id == 1) {
+    ra <- 0
+    rz <- 1/length(inds_AG)-.02
+  } else {
+    ra <- rz +.02
+    rz <- rz + 1/length(inds_AG)
+  }
+  ind_lab <- gsub("m", "", inds_AG[id])
+  ind_lab <- gsub("\\.", "-", ind_lab)
+  chr_ind <- all_chr[all_chr$individual == inds_AG[id]]
+  all_windows_large <- chr_ind[width(chr_ind) > 1e6,]
+  all_windows_small <- chr_ind[width(chr_ind) < 1e6,]
+  groups <- colnames(mcols(all_chr))[colnames(mcols(all_chr)) != "individual"]
+  
+  kpBars(gkp, data = genome_GR, y0 = rep(0, length(genome_GR)), y1 = rep(1, length(genome_GR)), col = "gray80", border = NA, r0 = ra, r1 = rz)
+  kpAxis(gkp, side = 1, data.panel=1, cex = 0.7, r0 = ra, r1 = rz)
+  kpText(gkp, chr=seqnames(genome_GR)[length(genome_GR)], x=width(genome_GR)[length(genome_GR)] + 2.6e7, y=0.5, labels = ind_lab, r0 = ra, r1 = rz)
+  for (g in 1:length(groups)) {
+    if (g == 1) {
+      ga <- 0
+      gz <- mcols(all_windows_large)[,groups[g]]
+    } else {
+      ga <- gz
+      gz <- gz+mcols(all_windows_large)[,groups[g]]
+    }
+    kpBars(gkp, data = all_windows_large, y0 = ga, y1 = gz, col = group_col[groups[g]], border = NA, r0 = ra, r1 = rz)
+  }
+  # kpPlotRegions(gkp, data = all_windows_large, data.panel = "ideogram", col = "grey20", avoid.overlapping = T, r0 = ra, r1 = rz)
+  # kpPlotRegions(gkp, data = all_windows_small, data.panel = "ideogram", col = "orange3", avoid.overlapping = T)
+}
+legend("right", #x = 0.9, y = 0.4, #"bottomright", #  yjust = .5, xjust = 0, # 
+       title = "ancestry", legend = c(gsub("group_", "", names(group_col)), "undetermined"), 
+       fill = c(group_col, "grey90"), bty = "n", xjust = 0, cex = 1.2)
+dev.off()
+```
+
+
+## plot all genomes admixed with D > 10%
+
+```{r}
+# plot all genomes admixed with D > 10%
+
+inds_D <- rownames(global)[global$D > .1 & global$AG == 0]
+# inds_D <- gsub("-", "\\.", inds_D)
+
+
+tiff(file.path(plot_dir, "all_D.tiff"),
+     width = 20, heigh = 12, unit = "in", res = 1000)
+par(mar = c(2,2,2,2))
+gkp <- plotKaryotype(genome = genome_GR, plot.type = 7,
+                     plot.params = pp2)
+kpDataBackground(gkp, data.panel ="ideogram", color = "white")
+kpAddBaseNumbers(gkp, tick.dist = 1e7)
+for (id in 1:length(inds_D)) {
+  if (id == 1) {
+    ra <- 0
+    rz <- 1/length(inds_D)-.02
+  } else {
+    ra <- rz +.02
+    rz <- rz + 1/length(inds_D)
+  }
+  ind_lab <- gsub("m", "", inds_D[id])
+  ind_lab <- gsub("\\.", "-", ind_lab)
+  chr_ind <- all_chr[all_chr$individual == inds_D[id]]
+  all_windows_large <- chr_ind[width(chr_ind) > 1e6,]
+  all_windows_small <- chr_ind[width(chr_ind) < 1e6,]
+  groups <- colnames(mcols(all_chr))[colnames(mcols(all_chr)) != "individual"]
+  
+  kpBars(gkp, data = genome_GR, y0 = rep(0, length(genome_GR)), y1 = rep(1, length(genome_GR)), col = "gray80", border = NA, r0 = ra, r1 = rz)
+  kpAxis(gkp, side = 1, data.panel=1, cex = 0.7, r0 = ra, r1 = rz)
+  kpText(gkp, chr=seqnames(genome_GR)[length(genome_GR)], x=width(genome_GR)[length(genome_GR)] + 2.6e7, y=0.5, labels = ind_lab, r0 = ra, r1 = rz)
+  for (g in 1:length(groups)) {
+    if (g == 1) {
+      ga <- 0
+      gz <- mcols(all_windows_large)[,groups[g]]
+    } else {
+      ga <- gz
+      gz <- gz+mcols(all_windows_large)[,groups[g]]
+    }
+    kpBars(gkp, data = all_windows_large, y0 = ga, y1 = gz, col = group_col[groups[g]], border = NA, r0 = ra, r1 = rz)
+  }
+  # kpPlotRegions(gkp, data = all_windows_large, data.panel = "ideogram", col = "grey20", avoid.overlapping = T, r0 = ra, r1 = rz)
+  # kpPlotRegions(gkp, data = all_windows_small, data.panel = "ideogram", col = "orange3", avoid.overlapping = T)
+}
+legend("right", #x = 0.9, y = 0.4, #"bottomright", #  yjust = .5, xjust = 0, # 
+       title = "ancestry", legend = c(gsub("group_", "", names(group_col)), "undetermined"), 
+       fill = c(group_col, "grey90"), bty = "n", xjust = 0, cex = 1.2)
+dev.off()
+```
+
+## plot all genomes pure E
+```{r}
+# plot all genomes pure E
+
+inds_ER <- rownames(global)[global$AG == 0 & global$D == 0 & global$OB == 0]
+# inds_ER <- gsub("-", "\\.", inds_ER)
+# inds_ER <- ifelse(grepl("TR", inds_ER), paste0(inds_ER, "m"), inds_ER)
+
+
+tiff(file.path(plot_dir, "all_ER.tiff"),
+     width = 20, heigh = 8, unit = "in", res = 1000)
+par(mar = c(2,2,2,2))
+gkp <- plotKaryotype(genome = genome_GR, plot.type = 7,
+                     plot.params = pp2)
+kpDataBackground(gkp, data.panel ="ideogram", color = "white")
+kpAddBaseNumbers(gkp, tick.dist = 1e7)
+for (id in 1:length(inds_ER)) {
+  if (id == 1) {
+    ra <- 0
+    rz <- 1/length(inds_ER)-.02
+  } else {
+    ra <- rz +.02
+    rz <- rz + 1/length(inds_ER)
+  }
+  ind_lab <- gsub("m", "", inds_ER[id])
+  ind_lab <- gsub("\\.", "-", ind_lab)
+  chr_ind <- all_chr[all_chr$individual == inds_ER[id]]
+  all_windows_large <- chr_ind[width(chr_ind) > 1e6,]
+  all_windows_small <- chr_ind[width(chr_ind) < 1e6,]
+  groups <- colnames(mcols(all_chr))[colnames(mcols(all_chr)) != "individual"]
+  
+  kpBars(gkp, data = genome_GR, y0 = rep(0, length(genome_GR)), y1 = rep(1, length(genome_GR)), col = "gray80", border = NA, r0 = ra, r1 = rz)
+  kpAxis(gkp, side = 1, data.panel=1, cex = 0.7, r0 = ra, r1 = rz)
+  kpText(gkp, chr=seqnames(genome_GR)[length(genome_GR)], x=width(genome_GR)[length(genome_GR)] + 2.6e7, y=0.5, labels = ind_lab, r0 = ra, r1 = rz)
+  for (g in 1:length(groups)) {
+    if (g == 1) {
+      ga <- 0
+      gz <- mcols(all_windows_large)[,groups[g]]
+    } else {
+      ga <- gz
+      gz <- gz+mcols(all_windows_large)[,groups[g]]
+    }
+    kpBars(gkp, data = all_windows_large, y0 = ga, y1 = gz, col = group_col[groups[g]], border = NA, r0 = ra, r1 = rz)
+  }
+  # kpPlotRegions(gkp, data = all_windows_large, data.panel = "ideogram", col = "grey20", avoid.overlapping = T, r0 = ra, r1 = rz)
+  # kpPlotRegions(gkp, data = all_windows_small, data.panel = "ideogram", col = "orange3", avoid.overlapping = T)
+}
+legend("right", #x = 0.9, y = 0.4, #"bottomright", #  yjust = .5, xjust = 0, # 
+       title = "ancestry", legend = c(gsub("group_", "", names(group_col)), "undetermined"), 
+       fill = c(group_col, "grey90"), bty = "n", xjust = 0, cex = 1.2)
+dev.off()
+
+
+```
+
+
+## plot all the other genomes
+
+```{r}
+# plot all the other genomes
+
+# inds_ER <- rownames(global)[global$AG == 0 & global$D == 0 & global$OB == 0]
+# inds_D <- rownames(global)[global$D > .1]
+# inds_AG <- rownames(global)[global$AG > .1]
+inds_other <- rownames(global)[!rownames(global) %in% c (inds_ER, inds_D, inds_AG)]
+# inds_other <- gsub("-", "\\.", inds_other)
+# inds_other <- ifelse(grepl("TR", inds_other), paste0(inds_other, "m"), inds_other)
+
+
+tiff(file.path(plot_dir, "all_others.tiff"),
+     width = 20, heigh = 16, unit = "in", res = 1000)
+par(mar = c(2,2,2,2))
+gkp <- plotKaryotype(genome = genome_GR, plot.type = 7,
+                     plot.params = pp2)
+kpDataBackground(gkp, data.panel ="ideogram", color = "white")
+kpAddBaseNumbers(gkp, tick.dist = 1e7)
+for (id in 1:length(inds_other)) {
+  if (id == 1) {
+    ra <- 0
+    rz <- 1/length(inds_other)-.02
+  } else {
+    ra <- rz +.02
+    rz <- rz + 1/length(inds_other)
+  }
+  ind_lab <- gsub("m", "", inds_other[id])
+  ind_lab <- gsub("\\.", "-", ind_lab)
+  chr_ind <- all_chr[all_chr$individual == inds_other[id]]
+  all_windows_large <- chr_ind[width(chr_ind) > 1e6,]
+  all_windows_small <- chr_ind[width(chr_ind) < 1e6,]
+  groups <- colnames(mcols(all_chr))[colnames(mcols(all_chr)) != "individual"]
+  
+  kpBars(gkp, data = genome_GR, y0 = rep(0, length(genome_GR)), y1 = rep(1, length(genome_GR)), col = "gray80", border = NA, r0 = ra, r1 = rz)
+  kpAxis(gkp, side = 1, data.panel=1, cex = 0.7, r0 = ra, r1 = rz)
+  kpText(gkp, chr=seqnames(genome_GR)[length(genome_GR)], x=width(genome_GR)[length(genome_GR)] + 2.6e7, y=0.5, labels = ind_lab, r0 = ra, r1 = rz)
+  for (g in 1:length(groups)) {
+    if (g == 1) {
+      ga <- 0
+      gz <- mcols(all_windows_large)[,groups[g]]
+    } else {
+      ga <- gz
+      gz <- gz+mcols(all_windows_large)[,groups[g]]
+    }
+    kpBars(gkp, data = all_windows_large, y0 = ga, y1 = gz, col = group_col[groups[g]], border = NA, r0 = ra, r1 = rz)
+  }
+  # kpPlotRegions(gkp, data = all_windows_large, data.panel = "ideogram", col = "grey20", avoid.overlapping = T, r0 = ra, r1 = rz)
+  # kpPlotRegions(gkp, data = all_windows_small, data.panel = "ideogram", col = "orange3", avoid.overlapping = T)
+}
+legend("right", #x = 0.9, y = 0.4, #"bottomright", #  yjust = .5, xjust = 0, # 
+       title = "ancestry", legend = c(gsub("group_", "", names(group_col)), "undetermined"), 
+       fill = c(group_col, "grey90"), bty = "n", xjust = 0, cex = 1.2)
+dev.off()
+```
+
+
+## plot only 3-way admixed individuals
+```{r}
+ind_3adm <- c("S-70", "S-134", "S-105", "S-122")
+
+tiff(file.path(plot_dir, "ind_3way_adm.tiff"),
+     width = 15, heigh = 6, unit = "in", res = 1000)
+par(mar = c(2,2,2,2))
+gkp <- plotKaryotype(genome = genome_GR, plot.type = 7,
+                     plot.params = pp2)
+kpDataBackground(gkp, data.panel ="ideogram", color = "white")
+kpAddBaseNumbers(gkp, tick.dist = 1e7)
+for (id in 1:length(ind_3adm)) {
+  if (id == 1) {
+    ra <- 0
+    rz <- 1/length(ind_3adm)-.02
+  } else {
+    ra <- rz +.02
+    rz <- rz + 1/length(ind_3adm)
+  }
+  ind_lab <- gsub("m", "", ind_3adm[id])
+  ind_lab <- gsub("\\.", "-", ind_lab)
+  chr_ind <- all_chr[all_chr$individual == ind_3adm[id]]
+  all_windows_large <- chr_ind[width(chr_ind) > 1e6,]
+  all_windows_small <- chr_ind[width(chr_ind) < 1e6,]
+  groups <- colnames(mcols(all_chr))[colnames(mcols(all_chr)) != "individual"]
+  
+  kpBars(gkp, data = genome_GR, y0 = rep(0, length(genome_GR)), y1 = rep(1, length(genome_GR)), col = "gray80", border = NA, r0 = ra, r1 = rz)
+  kpAxis(gkp, side = 1, data.panel=1, cex = 0.7, r0 = ra, r1 = rz)
+  kpText(gkp, chr=seqnames(genome_GR)[length(genome_GR)], x=width(genome_GR)[length(genome_GR)] + 2.6e7, y=0.5, labels = ind_lab, r0 = ra, r1 = rz)
+  for (g in 1:length(groups)) {
+    if (g == 1) {
+      ga <- 0
+      gz <- mcols(all_windows_large)[,groups[g]]
+    } else {
+      ga <- gz
+      gz <- gz+mcols(all_windows_large)[,groups[g]]
+    }
+    kpBars(gkp, data = all_windows_large, y0 = ga, y1 = gz, col = group_col[groups[g]], border = NA, r0 = ra, r1 = rz)
+  }
+  # kpPlotRegions(gkp, data = all_windows_large, data.panel = "ideogram", col = "grey20", avoid.overlapping = T, r0 = ra, r1 = rz)
+  # kpPlotRegions(gkp, data = all_windows_small, data.panel = "ideogram", col = "orange3", avoid.overlapping = T)
+}
+legend("right", #x = 0.9, y = 0.4, #"bottomright", #  yjust = .5, xjust = 0, # 
+       title = "ancestry", legend = c(gsub("group_", "", names(group_col)), "undetermined"), 
+       fill = c(group_col, "grey90"), bty = "n", xjust = 0, cex = 1.2)
+dev.off()
+```
+
+## averaged signals of admixed individuals
+
+
+
+```{r}
+adm_chr <- all_windows_large[!all_windows_large$individual %in% inds_ER]
+
+avg_local <- do.call(rbind, lapply(seqlevels(adm_chr), function(ch) {
+  print(ch)
+  chr <- adm_chr[adm_chr@seqnames == ch]
+  checkpoints <- sort(unique(c(start(chr), end(chr))))
+  chr_score <- do.call(rbind, lapply(checkpoints, function(p) {
+    print(paste(ch, ">", p))
+    check_gr <- pintersect(chr, 
+                           GRanges(ch, 
+                                   IRanges(start = p, end = p), 
+                                   strand = "+"))
+    check_gr <- mcols(check_gr[check_gr$hit])
+    check_score <- check_gr %>% 
+      as.data.frame() %>% 
+      select(- individual, - hit) %>% 
+      summarise(across(is.numeric, ~ mean(.x, na.rm = TRUE))) %>% 
+      mutate(chromosome = ch,
+             position = p) %>% 
+      relocate(chromosome, position)
+    return(check_score)
+  }))
+  return(chr_score)
+}))
+
+avg_plot <- avg_local %>% 
+  mutate(position = position/1e6,
+         set = "") %>% 
+  pivot_longer(cols = OB:ER, names_to = "ancestry", values_to = "proportion") %>% 
+  ggplot() + 
+  facet_grid(cols = vars(chromosome), rows = vars(set), scale = "free", space = "free", switch = "x") + 
+  geom_line(aes(x = position, y = proportion, color = ancestry), show.legend = F) +
+  scale_color_manual(values = group_col) +
+  theme_minimal() + 
+  theme(panel.grid.minor = element_blank(), 
+        axis.ticks = element_line(),
+        # panel.grid.major.y = element_blank(),
+        strip.background.x = element_rect(fill = "#dadde6", color = "#dadde6"),
+        strip.background.y = element_rect(fill = NA, color = NA),
+        strip.text.y = element_text(angle = 0, h = 0),
+        strip.placement = "outside") +
+  scale_x_continuous(breaks = seq(0, 80, 10)) +
+  xlab("Position (Mb)") + ylab("Average ancestry proportion")
+avg_plot
+ggsave("./plots/averaged_admixture_signals.pdf", width = 15, height = 4)
+```
+
+## plot all individuals together
+
+```{r}
+cum_min <- function(x) {
+  y <- x
+  tt <- 0
+  for (i in 1:length(x)) {
+    if (x[i] == 0 || is.na(x[i])) {
+      y[i] <- 0
+    } else {
+      y[i] <- tt
+      tt  <- tt + x[i]
+    }
+  }
+  return(y)
+}
+
+cum_min(c(0,0.5,0,0,0.5))
+
+cum_max <- function(x) {
+  y <- x
+  tt <- 0
+  for (i in 1:length(x)) {
+    if (x[i] == 0 || is.na(x[i])) {
+      y[i] <- 0
+    } else {
+      tt  <- tt + x[i]
+      y[i] <- tt
+    }
+  }
+  return(y)
+}
+
+cum_max(c(0,0.5,0.5,0,0))
+
+```
+
+
+```{r}
+ind_order <- unique(c(inds_ER, inds_other[!inds_other %in% ind_3adm], 
+                      inds_AG, inds_D, ind_3adm))
+
+all_blocks <- mcols(all_windows_large) %>% 
+  as.data.frame() %>% 
+  mutate(chromosome = unlist(mapply(rep, 
+                                    all_windows_large@seqnames@values, 
+                                    all_windows_large@seqnames@lengths)),
+         start = start(all_windows_large),
+         end = end(all_windows_large)) %>% 
+  relocate(chromosome, start, end, individual)
+
+lai_plot <- all_blocks %>% 
+  pivot_longer(cols = OB:ER, names_to = "ancestry", values_to = "proportion") %>% 
+  mutate(start = start/1e6,
+         end = end/1e6,
+         individual = factor(individual, 
+                             levels = ind_order)) %>% 
+  group_by(chromosome, start, end, individual) %>% 
+  mutate(proportion_min = cum_min(proportion),
+         proportion_max = cum_max(proportion)) %>% 
+  ggplot() + 
+  facet_grid(rows = vars(individual), cols = vars(chromosome),
+             scale = "free_x", space = "free_x", switch = "x", shrink = F) + 
+  geom_rect(aes(xmin = start, xmax = end,
+                ymin = proportion_min, ymax = proportion_max,
+                fill = ancestry)) +
+  scale_fill_manual(values = group_col, na.value = "gray") +
+  theme_minimal() + 
+  theme(panel.grid = element_blank(), 
+        axis.ticks = element_line(),
+        axis.text.y = element_blank(),
+        strip.background.x = element_rect(fill = "#dadde6", color = "#dadde6"),
+        strip.background.y = element_rect(fill = NA, color = NA),
+        # strip.background.y = element_rect(fill = "#dadde6", color = "#dadde6"),
+        strip.placement = "outside",
+        strip.text.y = element_text(angle = 0, h = 0),
+        panel.spacing.x = unit(4, "pt"), 
+        panel.spacing.y = unit(0.5, "pt"), 
+        panel.background = element_rect(fill = "gray60", color = "white")) +
+  scale_y_continuous(breaks = 0.5) +
+  scale_x_continuous(breaks = seq(0, 80, 10), expand = c(0, 0))+
+  xlab("position (Mb)") + ylab("ancestry assignment")
+ggsave("./plots/all_lai.pdf", width = 20, height = 12)
+```
+
+
+```{r}
+adm1 <- rownames(global)[global$AG > 0 & global$D == 0 & global$OB > 0]
+adm2 <- rownames(global)[global$AG > 0 & global$D > 0 & global$OB == 0]
+small_adm <- rownames(global)[!rownames(global) %in% c(inds_ER,inds_AG, inds_D, adm1, adm2)]
+adm_order <- unique(c(small_adm, inds_AG, inds_D, adm1, adm2))
+
+adm_blocks <- mcols(all_windows_large) %>% 
+  as.data.frame() %>% 
+  mutate(chromosome = unlist(mapply(rep, 
+                                    all_windows_large@seqnames@values, 
+                                    all_windows_large@seqnames@lengths)),
+         start = start(all_windows_large),
+         end = end(all_windows_large)) %>% 
+  relocate(chromosome, start, end, individual) %>% 
+  filter(individual %in% adm_order)
+
+lai_amd_plot <- adm_blocks %>% 
+  pivot_longer(cols = OB:ER, names_to = "ancestry", values_to = "proportion") %>% 
+  mutate(start = start/1e6,
+         end = end/1e6,
+         individual = factor(individual, 
+                             levels = adm_order)) %>% 
+  group_by(chromosome, start, end, individual) %>% 
+  mutate(proportion_min = cum_min(proportion),
+         proportion_max = cum_max(proportion)) %>% 
+  ggplot() + 
+  facet_grid(rows = vars(individual), cols = vars(chromosome),
+             scale = "free_x", space = "free_x", switch = "x", shrink = F) + 
+  geom_rect(aes(xmin = start, xmax = end,
+                ymin = proportion_min, ymax = proportion_max,
+                fill = ancestry)) +
+  scale_fill_manual(values = group_col, na.value = "gray") +
+  theme_minimal() + 
+  theme(panel.grid = element_blank(), 
+        axis.ticks = element_line(),
+        axis.text.y = element_blank(),
+        strip.background.x = element_rect(fill = "#dadde6", color = "#dadde6"),
+        strip.background.y = element_rect(fill = NA, color = NA),
+        # strip.background.y = element_rect(fill = "#dadde6", color = "#dadde6"),
+        strip.placement = "outside",
+        strip.text.y = element_text(angle = 0, h = 0),
+        panel.spacing.x = unit(4, "pt"), 
+        panel.spacing.y = unit(0.5, "pt"), 
+        panel.background = element_rect(fill = "gray60", color = "white")) +
+  scale_y_continuous(breaks = 0.5) +
+  scale_x_continuous(breaks = seq(0, 80, 10), expand = c(0, 0))+
+  xlab("position (Mb)") + ylab("ancestry assignment")
+```
+
+
+```{r}
+plot_grid(lai_amd_plot, avg_plot, nrow = 2, rel_heights = c(4,1), align = "v")
+lai_list <- gglist(list(lai_amd_plot, avg_plot))
+plot_list(gglist = lai_list, 
+          ncol = 1, heights = c(4,1),
+          labels = c("A", "B"))
+plot_list(gglist = lai_list)
+
+lai_amd_plot / avg_plot
+
+ggarrange 
+```
+
+## Admixture length
+
+
+```{r}
+all_blocks %>% 
+  pivot_longer(cols = OB:ER, names_to = "ancestry", values_to = "proportion") %>% 
+  mutate(individual = factor(individual, levels = ind_order),
+         length = end - start + 1) %>% 
+  filter(proportion != 0) %>% 
+  ggplot() +
+  geom_density(aes(x = length, color = ancestry), size = 1.5) +
+  scale_color_manual(values = group_col[-3]) +
+  theme_minimal() + 
+  theme(panel.grid.minor = element_blank(), 
+        # panel.grid.major.y = element_blank(),
+        strip.background = element_rect(fill = "#dadde6", color = "#dadde6"),
+        strip.placement = "outside") +
+  # scale_x_continuous(breaks = seq(0, 80, 10)) +
+  xlab("admixture block length")
+```
+
+## recombination rate
+
+```{r}
+marey_chr_data <- "./snps_data/Coffea_canephora_Crouzillat2020.txt"
+recom <- read.table(marey_chr_data, header = T)
+recom$map <- sapply(recom$map, function(i) 
+  paste0("Chr ", sprintf("%02d", which(LETTERS == i))), 
+  USE.NAMES = F)
+```
+
+```{r}
+ggplot(recom) + 
+  geom_point(aes(x = phys/1e6, y = gen), size = 0.5) +
+  facet_grid(cols = vars(map), scale = "free", space = "free", switch = "x") +
+  theme_minimal() + 
+  theme(panel.grid.minor = element_blank(), 
+        # panel.grid.major.y = element_blank(),
+        strip.background = element_rect(fill = "#dadde6", color = "#dadde6"),
+        strip.placement = "outside") +
+  scale_x_continuous(breaks = seq(0, 80, 10)) +
+  xlab("Physical distance (Mb)") +
+  ylab("Genetic distance (cM)")
+```
+
+```{r}
+recom <- recom %>% 
+  mutate(rate = gen/phys*1e6) 
+mean(recom$rate)
+nrow(recom)
+```
+
+```{r}
+marey_chr_data <- list.files("./snps_data", pattern = "chromosome", full.names = T)
+rec_rate <- do.call(rbind, lapply(marey_chr_data, function(f) read.table(f, header = T)))
+mean(rec_rate$rec.rate, na.rm = T)
+```
+

@@ -30,7 +30,7 @@ library(FactoMineR)
 
 ## Data
 
-```{r get_data}
+```{r get_data, include=FALSE}
 con <- dbConnect(RSQLite::SQLite(), dbname = "./genotyping/seq_kasp_array_genotypes_261SNPs.db")
 
 geno <- dbReadTable(con, "genotype")
@@ -49,14 +49,14 @@ all_geno <- all_geno[!rownames(all_geno) %in% c("S-59", "S-138"),]
 rownames(all_geno[-c(220:229),])
 ```
 
-```{r}
+```{r import_data}
 acc_info <- read.delim("./raw_genotype/all_accessions_info.tsv")
 acc_info <- acc_info %>% arrange(code)
 # acc_info <- acc_info %>% filter(!grepl("kasp", code))
 all_geno <- read.delim("./raw_genotype/all_genotypes.tsv", row.names = 1)
 all_geno <- all_geno[sort(rownames(all_geno)),]
 # all_geno[is.na(all_geno)] <- 9
-all_geno <- all_geno[!grepl("kasp", rownames(all_geno)),]
+# all_geno <- all_geno[!grepl("kasp", rownames(all_geno)),]
 ```
 
 
@@ -64,7 +64,7 @@ all_geno <- all_geno[!grepl("kasp", rownames(all_geno)),]
 
 
 ## PCA
-```{r}
+```{r write_geno_file_LEA}
 pca_dir <- "./pca_data"
 dir.create(pca_dir, showWarnings = F)
 
@@ -72,7 +72,7 @@ all_lfmm_file <- file.path(pca_dir, "all.lfmm")
 all_geno[is.na(all_geno)] <- 9
 write.lfmm(all_geno, all_lfmm_file)
 
-all_geno_file<- file.path(pca_dir, "all.geno")
+all_geno_file <- file.path(pca_dir, "all.geno")
 write.geno(all_geno, all_geno_file)
 ```
 
@@ -85,13 +85,31 @@ plotdir <- "./plot_paper"
 group9_col <- c(turbo(5), turbo(4, begin = 0.1, end = 0.9)[-3], "gray50")
 names(group9_col) <- c("E", "O", "C", "A", "D", "R", "B", "G", "Vietnam")
 group9_col <- group9_col[c("D", "C", "G", "A", "B", "O", "R", "E", "Vietnam")]
+
+group6_col <- group9_col
+group6_col["R"] <- group6_col["E"]
+group6_col["B"] <- group6_col["O"]
+group9_size <- c(rep(6, 8), 4)
+names(group9_size) <- names(group9_col)
+group9_size2 <- c(rep(3, 8), 5, 5)
+names(group9_size2) <- c(names(group9_col), "Vietnam core set")
+group9_alpha <- c(rep(1, 8), 0.8)
+names(group9_alpha) <- names(group9_col)
+group9_shape <- rep(16, 9)
+names(group9_shape) <- names(group9_col)
+group9_shape["R"] <- 17
+group9_shape["B"] <- 18
+group9_shape2 <- rep(21, 9)
+names(group9_shape2) <- names(group9_col)
+group9_shape2["R"] <- 24
+group9_shape2["B"] <- 23
 ```
 
-```{r pca_all}
+```{r pca_all, include=FALSE}
 all_pca <- pca(all_lfmm_file)
 ```
 
-```{r plot_pca_all}
+```{r plot_pca_all, include=FALSE}
 all_pca_proj <- data.frame("code" = rownames(all_geno),
                            "PC1" = all_pca$projections[,1],
                            "PC2" = all_pca$projections[,2],
@@ -135,7 +153,7 @@ all_pca_proj <- all_pca_proj %>%
   as.data.frame() %>% 
   rownames_to_column("code") 
 
-all_pca_proj <- left_join(all_pca_proj, ref_info, by = "code")
+all_pca_proj <- left_join(all_pca_proj, acc_info, by = "code")
 
 all_pca_proj <- all_pca_proj %>% 
   mutate(group = ifelse(is.na(group), "Vietnam", group)) %>%
@@ -147,14 +165,18 @@ eigen <- all_pca$eig[,1]
 tiff(filename = file.path(plotdir, "pca_all.tiff"),
      width = 6, height = 5, units = "in", res = 1200)
 pca1 <- all_pca_proj %>% 
-  arrange(desc(group)) %>% 
+  arrange(group) %>%
   ggplot() +
-  geom_point(aes(x = PC1, y = PC2, color = group, shape = group), size = 5) +
+  geom_point(aes(x = PC1, y = PC2, 
+                 color = group, shape = group, size = group, alpha = group), 
+             size = 5) +
   # geom_text(aes(x = PC1, y = PC2, label = label, color = group)) +
   xlab(paste0("PC1 (", format(eigen[1]/sum(eigen)*100, digits = 2), "%)")) +
   ylab(paste0("PC2 (", format(eigen[2]/sum(eigen)*100, digits = 2), "%)")) +
-  scale_color_manual(values = group9_col) + 
-  scale_shape_manual(values = 0:8) +
+  scale_color_manual(values = group6_col) + 
+  scale_shape_manual(values = group9_shape) +
+  scale_size_manual(values = group9_size) + 
+  scale_alpha_manual(values = group9_alpha) +
   theme_minimal() + 
   theme(panel.border = element_rect(color = "gray", fill = NA),
         axis.title = element_text(size = 12))
@@ -164,25 +186,48 @@ dev.off()
 
 ## NJ clustering
 
-```{r}
+```{r eucli_dist_LEA}
 all_geno[all_geno == 9] <- NA
 all_dist <- dist(all_geno, method = "euclidean")
+```
+
+
+```{r eucli_dist_adegenet, include=FALSE}
+all_df <- all_geno
+all_df[all_df == 0] <- 11
+all_df[all_df == 1] <- 12
+all_df[all_df == 2] <- 22
+all_genind <- df2genind(all_df, ncode = 1, pop = acc_info$group)
 all_dist <- adegenet::dist.genpop(as.genpop(all_genind@tab[nInd(all_genind):1,]), method = 4)
 # all_dist <- dist(all_geno)
+```
+
+
+```{r dissim, include=FALSE}
+all_dist <- poppr::bitwise.dist(all_gl, euclidean = T, missing_match = T, percent = T)
+```
+
+
+
+
+
+```{r nj_tree}
 nj_tree <- ape::nj(all_dist)
 plot(nj_tree, "u")
 nj1 <- ggtree(nj_tree, ladderize = F, layout = "ape", color = "gray") %<+% acc_info +
   # geom_tiplab(aes(subset = grepl("S-", label), color = group), hjust = -0.5,
   #             linesize = .2, size = 5) +
-  geom_tippoint(aes(color = group, shape = group, size = group, alpha = group)) +
+  geom_tippoint(aes(color = group, size = group, alpha = group, shape = group)) +
   guides(color = guide_legend(title = "group")) +
-  scale_shape_manual(values = 0:8) +
-  scale_color_manual(values = group9_col) +
-  scale_size_manual(values = c(rep(5, 8), 2)) +
-  scale_alpha_manual(values = c(rep(1, 8), 0.8)) +
-  coord_flip() + scale_y_reverse() + scale_x_reverse()
+  scale_shape_manual(values = group9_shape) +
+  scale_color_manual(values = group6_col) +
+  scale_size_manual(values = group9_size) +
+  scale_alpha_manual(values = group9_alpha) +
+  # coord_flip() +
+  scale_x_reverse() +
+  scale_y_reverse() 
 
-ggtree(hclust(all_dist), ladderize = F, layout = "dendrogram") %<+% acc_info +
+ggtree(hclust(all_dist), ladderize = F) %<+% acc_info +
   # geom_tiplab(aes(subset = grepl("S-", label), color = group), hjust = -0.5,
   #             linesize = .2, size = 5) +
   geom_tippoint(aes(color = group), shape = 16, size = 3) +
@@ -285,7 +330,7 @@ all_pca_proj %>%
 
 ```{r run_snmf}
 all_snmf <- snmf(input.file = all_geno_file, K = 1:10, 
-                 repetitions = 100, CPU = 3, 
+                 repetitions = 100, CPU = 20, 
                  entropy = T, seed = 987654321, project = "new")
 plot(all_snmf)
 
@@ -468,7 +513,7 @@ vn_ord6 <- all_snmf_prop %>%
   group_by(code) %>% 
   arrange(desc(proportion), .by_group = T) %>% 
   slice_head(n = 2) %>% 
-  slice_tail(n =1) %>% 
+  slice_tail(n = 1) %>% 
   group_by(ancestry) %>% 
   arrange(desc(proportion), .by_group = T) %>% pull(code)
   # pivot_wider(names_from = ancestry, values_from = proportion) %>% 
@@ -487,7 +532,7 @@ ancestry_ord6 <- all_snmf_prop %>%
   mutate(new_ancestry = which(names(group9_col) %in% group)) %>% 
   group_by(ancestry) %>% 
   arrange(desc(proportion)) %>% 
-  slice_head(n=1) %>% 
+  slice_head(n = 1) %>% 
   # mutate(new_ancestry = as.numeric(group)) %>% 
   select(ancestry, new_ancestry)
 
@@ -674,7 +719,7 @@ grp_geno <- all_geno[rownames(all_geno) %in% indNames(grp_genind),]
 grp_geno <- all_geno
 grp_genind <- all_genind
 grp_genind@strata$other_pop <- grp_genind@strata$group
-grp_genind@strata$other_pop[grp_genind@strata$other_pop != "Vietnam"] <- "Africa"
+# grp_genind@strata$other_pop[grp_genind@strata$other_pop != "Vietnam"] <- "Africa"
 pop(grp_genind) <- grp_genind@strata$other_pop
 ```
 
@@ -722,12 +767,17 @@ pca2 <- core6 %>%
   mutate(group = fct_relevel(group, names(group9_col))) %>% 
   arrange(group) %>% 
   ggplot() +
-  geom_point(aes(x = PC1, y = PC2, color = group, shape = group), size = 5) +
+  geom_point(aes(x = PC1, y = PC2, 
+                 fill = group, shape = group, alpha = group, color = group, size = group)) +
   # geom_text(aes(x = PC1, y = PC2, label = label, color = group)) +
   xlab(paste0("PC1 (", format(eigen[1]/sum(eigen)*100, digits = 2), "%)")) +
   ylab(paste0("PC2 (", format(eigen[2]/sum(eigen)*100, digits = 2), "%)")) +
-  scale_color_manual(values = c(as.character(group9_col), "gold3")) + 
-  scale_shape_manual(values = c(0:8, 8)) +
+  # scale_color_manual(values = c(as.character(group6_col), "gold3")) +
+  scale_color_manual(values = c(rep("black", 9), "gold3")) +
+  scale_fill_manual(values = c(as.character(group6_col), "gold3")) + 
+  scale_shape_manual(values = c(group9_shape2, c(group9_shape2, "Vietnam core set" = 8))) +
+  scale_size_manual(values = c(rep(3, 9), 2)) +
+  scale_alpha_manual(values = c(rep(1, 8), 0.7, 1)) +
   theme_minimal() + 
   theme(panel.border = element_rect(color = "gray", fill = NA),
         axis.title = element_text(size = 12))
@@ -768,6 +818,8 @@ eval_plots <- plot_grid(eval_core_6$plot[[5]],
                         nrow = 1, labels = c("A", "B", "C"))
 tiff(filename = file.path(plotdir, "eval_core_6.tiff"),
      width = 8, height = 9, units = "in", res = 1200)
+pdf(file.path(plotdir, "eval_core_6.pdf"),
+     width = 8, height = 9)
 plot_grid(eval_plots, pca2, ncol = 1, labels = c("", "D"), rel_heights = c(0.6, 1))
 dev.off()
 ```
@@ -1136,19 +1188,17 @@ afmap <- ggplot(data = africa) +
   theme(legend.box.margin = margin(l = 20), 
         legend.key.size = unit(14, "pt"),
         legend.key.height = unit(15, "pt"))
-
-
 ```
 
 
 ```{r}
-group_coord <- acc_info %>% 
-  filter(!is.na(long)) %>% 
-  group_by(group) %>% 
-  summarise(x_mean = mean(long),
-            y_mean = mean(lat))
-group_coord$x_mean[group_coord$group == "A"] <- 10
-group_coord$x_mean[group_coord$group == "A"] <- 10
+# group_coord <- acc_info %>% 
+#   filter(!is.na(long)) %>% 
+#   group_by(group) %>% 
+#   summarise(x_mean = mean(long),
+#             y_mean = mean(lat))
+# group_coord$x_mean[group_coord$group == "A"] <- 10
+# group_coord$x_mean[group_coord$group == "A"] <- 10
 
 rob_countries_names <- c("Ivory Coast", "Cameroon", "Angola", 
                          "Gabon", "Central African Republic",
@@ -1165,18 +1215,18 @@ colnames(group_coord) <- c("x_mean", "y_mean", "group")
 group_coord <- sp::coordinates(as(rob_countries, "Spatial")) %>% as.data.frame()
 group_coord[,3] <- c("G", "B", "D", "C", "ER", "A", "O")
 colnames(group_coord) <- c("x_mean", "y_mean", "group")
-ran_grp <- do.call(rbind, lapply(1:nrow(group_coord), function(i) {
-  ran_pts <- data.frame(x_mean = runif(100, 0.00, 5.00) * sample(c(-1, 1), 1) + group_coord[i,1], 
-                        y_mean = runif(100, 0.00, 3.00) * sample(c(-1, 1), 1) + group_coord[i,2],
-                        group = group_coord[i,3])
-}))
+# ran_grp <- do.call(rbind, lapply(1:nrow(group_coord), function(i) {
+#   ran_pts <- data.frame(x_mean = runif(100, 0.00, 5.00) * sample(c(-1, 1), 1) + group_coord[i,1], 
+#                         y_mean = runif(100, 0.00, 3.00) * sample(c(-1, 1), 1) + group_coord[i,2],
+#                         group = group_coord[i,3])
+# }))
+```
+
+```{r}
 group6_col <- group9_col[-c(7, 9)]
 group6_col["B"] <- group6_col["O"]
 names(group6_col)[7] <- "ER"
-
-
 ```
-
 
 ```{r}
 pop_annot <- lapply(names(group9_col)[-9], function(i) {
@@ -1213,9 +1263,9 @@ afmap +
   pop_annot
 ```
 
-```{r}
-ggplot(data = africa) +
-  geom_sf(fill = "white", color = "grey20", size = 5) +
+```{r african_map}
+afmap <- ggplot(data = africa) +
+  geom_sf(fill = "white", color = "grey40", size = 0.3) +
   coord_sf(xlim = c(-15, 35), ylim = c(-18, 13), expand = TRUE) +
   geom_point(data = group_coord,
             aes(x = x_mean, y = y_mean, fill = group, color = group, size = group),
