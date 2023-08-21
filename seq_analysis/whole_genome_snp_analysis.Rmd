@@ -1,0 +1,546 @@
+---
+title: "Whole genome SNPs analysis"
+author: "Tram"
+date: "5/15/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(eval = FALSE)
+library(vcfR)
+library(LEA)
+library(adegenet)
+library(tidyverse)
+library(data.table)
+```
+
+# SNP calling
+## Materials  
+- VN samples (35 new + 15 old): already cleaned by BGI (trim adapter + remove reads with 40% length < Q10))  
+- African samples: not cleaned  
+
+## Methods  
+### Cleaning  
+
+1. removing adapters by fastp 0.23.1 (skip for VN samples sequenced by BGI)  
+```{bash}
+fastp -i $i1 -o $o1 -I $i2 -O $o2 --detect_adapter_for_pe --disable_quality_filtering --disable_length_filtering
+```
+
+2. trimming read bases < Q20 (min read length = 35) by cutadaptp 33.1  
+```{bash}
+cutadapt -m 35 -q 20,20 -o $fo1 -p $fo2 $o1 $o2
+```
+
+## SNP calling  
+using [snakemake pipeline](https://github.com/vibaotram/gbp_variantcalling)
+github version: d4adf5dd468859075fc0ed21e2612a8f3b2cdb5a
+
+`configuration`
+```
+fastq_dir: "test/fastq_dir"
+output_dir: "test/output"
+ref: "test/ref/CC1.8_v2_pseudomolecule_cat.fa"
+
+## quality control before processing
+fastqc:
+    params: ""
+    threads: 2
+
+## pre-processing if neccessary
+# fastp
+
+## variant calling from fastq
+bwa_mem:
+    params: "-R '@RG\tID:RC3\tSM:RC3\tPL:Illumina'"
+    threads: 2
+    mem: ""
+
+
+picard_SortSam:
+    params: "-SORT_ORDER coordinate -VALIDATION_STRINGENCY SILENT" # index reference
+    mem: ""
+    
+samtools_view:
+    params: "-h -b -f 0x02" # convert sam to bam and filter mapping
+    threads: 48
+    mem: ""
+
+MarkDuplicates:
+    params: "--remove-sequencing-duplicates false --read-validation-stringency SILENT"
+    threads: 2
+    mem: ""
+
+HaplotypeCaller:
+    params: "--read-filter GoodCigarReadFilter --annotate-with-num-discovered-alleles true --max-alternate-alleles 10"
+    threads: 2
+    mem: "50G"
+
+CombineGVCFs:
+    params: ""
+    mem: ""
+
+GenotypeGVCFs:
+    params: ""
+    mem: ""
+
+## stats before and/or after variant filtration
+
+## variant filtration
+gatk_VariantFiltration:
+    params: "--cluster-size 4 --cluster-window-size 10 --filter-name 'LOW-QUAL' --filter-expression 'QUAL<200' --filter-name 'LOW-MQ' --filter-expression 'MQ0>=4 && ((MQ0/(1.0 * DP)) > 0.1 )' "
+    suffix: "_VariantFiltration"
+gatk_SelectVariants:
+    params: "--restrict-alleles-to BIALLELIC --select-type-to-include SNP"
+    suffix: "_SelectVariants"
+vcftools:
+    params: "--min-meanDP 10 --max-meanDP 100 --max-missing 0.85" # singleton, doubleton
+    suffix: "_vcftools"
+filtration_mem: ""
+```
+
+`tool versions` (conda environment):
+```
+name: gbp_variantcalling
+channels:
+    - bioconda
+    - conda-forge
+dependencies:
+    - gatk4=4.2.4.0
+    - bwa=0.7.8
+    - samtools=1.14
+    - picard=2.26.9
+    - vcftools=0.1.16
+    - bcftools=1.14
+    - fastqc=0.11.9
+    - multiqc=1.12
+    - libgcc-ng=11.2.0
+    - openjdk=8.0.312
+```
+
+
+## Statistics of the variants
+
+```{bash}
+rsync -vaurP baotram@core.cluster.france-bioinformatique.fr:/shared/projects/most_kmer/vcf_bgi_2021/gbp_output/vcf_by_chrom/out.* /data/projects/rob/data/most_elai/snps_data
+```
+
+histogram of mean depth
+```{r}
+md_file <- "./snps_data/out.ldepth.mean"
+md <- fread(md_file)
+
+pdf("./plots/MD_hist.pdf", width = 10, height = 6)
+ggplot(md) +
+  geom_histogram(aes(x = MEAN_DEPTH), binwidth = 1) +
+  geom_vline(xintercept = 10) +
+  geom_vline(xintercept = 100) +
+  scale_y_log10() +
+  theme_minimal()
+dev.off()
+```
+
+```{r}
+length(md$MEAN_DEPTH[md$MEAN_DEPTH < 10]) + length(md$MEAN_DEPTH[md$MEAN_DEPTH > 100])
+```
+
+
+histogram of quality
+```{r}
+lq_file <- "./snps_data/out.lqual"
+lq <- fread(lq_file)
+hist_lq <- hist(lq$QUAL, breaks = 1e5, plot = F) 
+hist_lq_df <- data.frame(QUAL = hist_lq$breaks[-1],
+                         counts = hist_lq$counts)
+ggplot(hist_lq_df) +
+  geom_col(aes(x = QUAL, y = counts)) + 
+  geom_vline(xintercept = 200) +
+  scale_y_log10() +
+  # scale_x_log10() +
+  theme_minimal()
+
+pdf("./plots/QUAL_hist.pdf", width = 10, height = 6)
+ggplot(lq) +
+  geom_histogram(aes(x = QUAL), binwidth = 100) +
+  geom_vline(xintercept = 200) +
+  scale_y_log10() +
+  # scale_x_log10() +
+  theme_minimal()
+dev.off()
+```
+
+```{r}
+length(lq$QUAL[lq$QUAL < 200])
+```
+
+
+histogram of missing data
+```{r}
+lm_file <- "./snps_data/out.lmiss"
+lm <- fread(lm_file)
+
+pdf("./plots/MISS_hist.pdf", width = 10, height = 6)
+ggplot(lm) +
+  geom_histogram(aes(x = F_MISS), binwidth = 0.01) +
+  geom_vline(xintercept = 0.85) +
+  scale_y_log10() +
+  theme_minimal()
+dev.off()
+```
+
+```{r}
+length(lm$F_MISS[lm$F_MISS > 0.15])
+```
+
+## Results of SNP calling  
+Number of SNPs before and after filtering:  
+- raw: 78,336,510
+- VariantFiltration (`--cluster-size 4 --cluster-window-size 10 --filter-name 'LOW-QUAL' --filter-expression 'QUAL<200'`): 34,871,261
+- SelectVariants (`--restrict-alleles-to BIALLELIC --select-type-to-include SNP`): 23,122,508
+- vcftools (`--min-meanDP 10 --max-meanDP 100 --max-missing 0.85`): 19,040,165
+- remove singletons by vcftools: 13,991,298
+
+
+*Note: `--cluster-size 4 --cluster-window-size 10` is used to get rid of regions with sequencing error (when sequencing error occurs in cluster)*
+
+# Genetic structure using genome wide SNPs
+## Materials  
+- 45 VN individuals + 55 African reference individuals
+- 100818 SNPs evenly distributed in each window of 5000 bp, and minor allele frequencies 0.02
+
+```
+VCFtools - 0.1.16
+(C) Adam Auton and Anthony Marcketta 2009
+
+Parameters as interpreted:
+	--gzvcf all_final_quality_SNPbiallelic_depth_missing_singletons_singletons.vcf.gz
+	--maf 0.02
+	--thin 5000
+	--out all_final_thin5000_maf002
+	--recode
+```
+
+import vcf file in R
+```{r}
+vcf_thin <- "./snps_data/all_final_thin5000_maf002.recode.vcf"
+vcf_thin <- "/shared/projects/afrob_seq/wgs_snp/vcf_bgi_2021/gbp_output/filtered_vcf_by_chrom/af_final_maf005_thin5k_60inds.recode.vcf"
+snp_thin <- read.vcfR(vcf_thin)
+snp_thin@fix[,1] <- gsub("\\.", "_", snp_thin@fix[,1])
+```
+
+
+## Methods  
+- genetic structure of reference
+- genetic structure of reference + VN
+using snmf
+
+
+```{r}
+genind_thin <- vcfR2genind(snp_thin)
+# as.matrix(genind_thin)[1:5,1:5]
+df_thin <- genind2df(genind_thin)
+df_thin_md <- apply(df_thin, c(1,2), function(i) {
+  i <- as.character(i)
+  if (grepl("00", i)) {
+    i <- 0
+  } else if (i %in% c("01", "10")) {
+    i <- 1
+  } else if (grepl("11", i)) {
+    i <- 1
+  } else {
+    i <- 9
+  }
+  return(i)
+})
+```
+
+```{r}
+
+snmf_dir <- "./snmf_60inds"
+dir.create(snmf_dir)
+all_geno_file <- file.path(snmf_dir, "thin_all.geno")
+write.geno(df_thin_md, all_geno_file)
+ref_geno_file <- file.path(snmf_dir, "thin_ref.geno")
+ref_thin_md <- df_thin_md[!grepl("^S-|TR", rownames(df_thin_md)),]
+write.geno(ref_thin_md, ref_geno_file)
+```
+
+snmf for the reference set only, with best K = 5
+```{r}
+ref_snmf <- snmf(ref_geno_file, K = 1:10, repetitions = 10, CPU = 2, 
+                 entropy = T, project = "new", seed = 11)
+plot(ref_snmf)
+```
+
+```{r}
+best_k <- which.min(lapply(1:10, function(i) min(cross.entropy(ref_snmf, K = i))))
+best_run <- which.min(cross.entropy(ref_snmf, K = best_k))
+ind_ord <- LEA::barchart(ref_snmf, K = best_k, run = best_run, plot = F)
+ref_prop <- Q(ref_snmf, K = best_k, run = best_run)
+ref_prop <- ref_prop %>% 
+  as.data.frame() %>% 
+  mutate(ind = factor(rownames(ref_thin_md), 
+                      levels = rownames(ref_thin_md)[ind_ord$order])) %>% 
+  pivot_longer(cols = -ind, names_to = "ancestry", values_to = "proportion")
+ref_prop$ancestry <- as.factor(ref_prop$ancestry)
+levels(ref_prop$ancestry) <- c("ER", "OB", "AG", "D", "C")
+ref_prop$ancestry <- factor(ref_prop$ancestry, levels = c("ER", "OB", "C", "AG", "D"))
+turbo_col <- c("#30123BFF", "#28BBECFF", "#A2FC3CFF", "#FB8022FF", "#7A0403FF")
+ggplot(ref_prop) + 
+  geom_col(aes(x = ind, y = proportion, fill = ancestry), width = 1) + 
+  scale_fill_manual(values = turbo_col) +
+  theme_minimal() + 
+  theme(axis.text.x = element_text(angle = 90, h = 1, vjust = 0.5))
+```
+
+
+snmf for the whole set, with K = 5
+```{r}
+all_snmf <- snmf(all_geno_file, K = 1:10, repetitions = 10, CPU = 1, 
+                 entropy = T, project = "new", seed = 11)
+plot(all_snmf)
+```
+
+## Results
+
+```{r}
+best_k <- 5 #which.min(lapply(1:10, function(i) min(cross.entropy(all_snmf, K = i))))
+best_run <- which.min(cross.entropy(all_snmf, K = best_k))
+ind_ord <- barchart(all_snmf, K = best_k, run = best_run, plot = F)
+all_prop <- Q(all_snmf, K = best_k, run = best_run)
+all_prop <- all_prop %>% 
+  as.data.frame() %>% 
+  mutate(ind = factor(rownames(df_thin_md), 
+                      levels = rownames(df_thin_md)[ind_ord$order])) %>% 
+  pivot_longer(cols = -ind, names_to = "ancestry", values_to = "proportion")
+all_prop$ancestry <- as.factor(all_prop$ancestry)
+levels(all_prop$ancestry) <- c("C", "OB", "ER", "AG", "D")
+all_prop$ancestry <- factor(all_prop$ancestry, levels = c("ER", "OB", "C", "AG", "D"))
+ggplot(all_prop) + 
+  geom_col(aes(x = ind, y = proportion, fill = ancestry), width = 1) + 
+  scale_fill_manual(values = turbo_col) +
+  theme_minimal() + 
+  theme(axis.text.x = element_text(angle = 90, h = 1, vjust = 0.5))
+```
+
+```{r}
+all_prop %>% mutate(data = "reference set",
+                    origin = ifelse(grepl("S-|TR", ind), "VN", "Africa")) %>% 
+  ggplot() + 
+  facet_grid(cols = vars(origin), scales = "free", space = "free") +
+  geom_col(aes(x = ind, y = proportion, fill = ancestry), width = 1) + 
+  scale_fill_manual(values = turbo_col) +
+  theme_minimal() + 
+  theme(axis.text.x = element_text(angle = 90, h = 1, vjust = 0.5))
+```
+
+put the 2 snmf results together on the same plot 
+```{r}
+cmp_prop <- rbind(all_prop %>% mutate(data = "whole set",
+                                      origin = ifelse(grepl("S-|TR", ind), "VN", "Africa")),
+          ref_prop %>% mutate(data = "reference set",
+                                      origin = ifelse(grepl("S-|TR", ind), "VN", "Africa")))
+ggplot(cmp_prop) + 
+  facet_grid(rows = vars(data), cols = vars(origin), scales = "free", space = "free") +
+  geom_col(aes(x = ind, y = proportion, fill = ancestry), width = 1) + 
+  scale_fill_manual(values = turbo_col) +
+  theme_minimal() + 
+  theme(axis.text.x = element_text(angle = 90, h = 1, vjust = 0.5))
+```
+
+
+snmf for the whole set with K = 6
+```{r}
+best_k <- 6 #which.min(lapply(1:10, function(i) min(cross.entropy(all_snmf, K = i))))
+best_run <- which.min(cross.entropy(all_snmf, K = best_k))
+ind_ord <- barchart(all_snmf, K = best_k, run = best_run, plot = F)
+all_prop <- Q(all_snmf, K = best_k, run = best_run)
+all_prop <- all_prop %>% 
+  as.data.frame() %>% 
+  mutate(ind = factor(rownames(df_thin_md), 
+                      levels = rownames(df_thin_md)[ind_ord$order])) %>% 
+  pivot_longer(cols = -ind, names_to = "ancestry", values_to = "proportion")
+all_prop$ancestry <- as.factor(all_prop$ancestry)
+levels(all_prop$ancestry) <- c("C", "OB", "ER", "AG", "D")
+all_prop$ancestry <- factor(all_prop$ancestry, levels = c("AG", "C", "D", "ER", "OB"))
+ggplot(all_prop) + 
+  geom_col(aes(x = ind, y = proportion, fill = ancestry), width = 1) + 
+  scale_fill_manual(values = c(turbo_col, "pink")) +
+  theme_minimal() + 
+  theme(axis.text.x = element_text(angle = 90, h = 1, vjust = 0.5))
+```
+
+==>> because some VN individuals forms a new cluster when K > 4 (maybe they are closely related), then for LAI, to simulate the source populations, we run snmf on the **reference only**.
+
+# Local ancestry inference
+## Materials  
+- individuals: 45 VN + 55 Africa
+- 13,991,298 whole-genome SNPs
+
+## Methods  
+1. simulate source populations, based on SNMF genotypic frequencies, using the whole genome SNPs
+2. run 2 ELAI sets: whole SNPs and even SNPs
+3. merge the 2 ELAI sets
+
+use the workflow `snakelai` (i don't remember which version was working before, I will try with this https://github.com/vibaotram/snakelai/commit/661597d792fbd31b80fdd5b56ddb393edafb1e56)
+
+
+```{bash}
+ssh baotram@core.cluster.france-bioinformatique.fr
+cd /shared/projects/vietcaf/scripts/snakelai/
+git pull origin master
+# git reset --hard 661597d792fbd31b80fdd5b56ddb393edafb1e56
+```
+
+```{bash}
+ssh baotram@bioinfo-master.ird.fr
+cd /data3/projects/vietcaf/baotram/scripts/snakelai
+cd /data/projects/rob/data/most_snp_2021
+rsync -vauP baotram@core.cluster.france-bioinformatique.fr:/shared/projects/most_kmer/vcf_bgi_2021/gbp_output/filtered_vcf_by_chrom/all_final_quality_SNPbiallelic_depth_missing_singletons_singletons.vcf .
+rsync -vauP baotram@core.cluster.france-bioinformatique.fr:/shared/projects/most_kmer/vcf_bgi_2021/gbp_output/filtered_vcf_by_chrom/vn_final.recode.vcf .
+cd /data/projects/rob/data/most_elai
+mkdir elai_out
+mkdir elai_out/config
+```
+
+
+this version can use different vcf files for source and test individuals
+so I created a separate vcf file for all the VN individuals and one for only the reference individuals  
+
+
+```{bash}
+ssh baotram@core.cluster.france-bioinformatique.fr
+cd /shared/projects/most_kmer/vcf_bgi_2021/gbp_output/filtered_vcf_by_chrom/
+ls /shared/projects/elai_most/data/fastq/fastq_2019_clean | grep 'S-*\|TR*' > vn_accessions.txt
+
+# vcf file for VN inds
+module load vcftools/0.1.16 
+vcftools \
+--vcf all_final_quality_SNPbiallelic_depth_missing_singletons_singletons.vcf \
+--keep vn_accessions.txt \
+--recode \
+--out vn_final
+
+# vcf file for AF inds
+module load vcftools/0.1.16 
+vcftools \
+--vcf all_final_quality_SNPbiallelic_depth_missing_singletons_singletons.vcf \
+--remove vn_accessions.txt \
+--recode \
+--out african_final
+```
+
+then, run `snakelai` with the following configuration on IFB  
+(running on IFB is much much much faster than in ITrop)
+
+`configuration`:  /shared/projects/elai_most/data/snakelai_out_all/config/config_snakelai_all.yaml
+
+```
+####################
+#### INPUT FILES
+
+genome: "/shared/projects/vietcaf/data/reference/CC1.8_v2_pseudomolecule_cat.fa" # fasta file
+test_vcf: "/shared/projects/most_kmer/vcf_bgi_2021/gbp_output/filtered_vcf_by_chrom/vn_final.recode.vcf"
+source_vcf: "/shared/projects/most_kmer/vcf_bgi_2021/gbp_output/filtered_vcf_by_chrom/african_final.recode.vcf"
+simulate_source: TRUE
+source_files: []
+test_file: "" # if filled, test_id will be ignored
+snp_file: ""
+test_id: "@" # "@" for all genotypes or specific id
+chromosome: "@" # "@" for all chromosome or specific chroms
+
+####################
+#### OUTPUT
+outdir: "/shared/projects/elai_most/data/snakelai_out_all"
+
+######################
+#### SNP SELECTION
+# random_snps: true # random or ordered
+# n_batches: 1 # only if "random" split
+# batch_size: 1000 # number of snps per batch
+# snp_den: [1, 500000] # random selection only, snp density: [nb snps, per kb]. if this object is set, batch_size will be ignored
+split_snps_cores: 20
+snp_selection:
+  even:
+    nb_snps: 1 # "all"/integer
+    window_size: 5000 # "chrom"/integer
+  all:
+    nb_snps: "all" # "all"/integer
+    window_size: 100000 # "chrom"/integer
+# nb_batches: 1 # number of snp sets to be randomly selected
+
+
+######################
+#### SOURCE GENOTYPES SIMULATION
+nb_groups: 5
+nb_genotypes: 100 # nb of genotypes per group
+simulate_cores: 5
+simulate_mem_gb: 20
+
+####################
+#### ELAI PARAMS
+elai: "/shared/projects/vietcaf/scripts/elai/elai-lin" # "/data3/projects/vietcaf/baotram/scripts/elai/elai-lin" # 
+
+elai_params:
+  c5_mg20: "-c 5 -mixgen 20 --exclude-nopos --exclude-miss1"
+  #c5_mg10_s60: "-c 5 -mixgen 10 -s 60 --exclude-nopos --exclude-miss1"
+
+elai_mem_gb: 20
+
+merged_snps: ["even", "all"]
+merged_params: "c5_mg_20"
+
+vcftools: vcftools/0.1.16
+singularity: "/shared/projects/vietcaf/scripts/snakelai/singularity-container_myr_4-0-2_rstudio_1.3.sif"
+```
+
+
+
+submit scripts: /shared/projects/elai_most/data/snakelai_out_all/config/submit_snakelai_all.sh
+```
+#!/bin/bash
+#SBATCH --job-name elai_all_vn
+#SBATCH --partition long
+#SBATCH --cpus-per-task 11
+#SBATCH --output /shared/projects/elai_most/data/snakelai_out_all/config/slurm-%x_%j.log
+#SBATCH --error /shared/projects/elai_most/data/snakelai_out_all/config/slurm-%x_%j.log
+
+module load singularity
+module load conda
+module load snakemake/6.5.0
+
+cd /shared/projects/vietcaf/scripts/snakelai
+source venv/bin/activate
+
+snakemake --nolock --use-conda --use-envmodules --use-singularity --singularity-args " -B /shared/home/baotram,/shared/projects/vietcaf" --cores --jobs -p --verbose \
+--latency-wait 60 --keep-going --rerun-incomplete \
+--cluster "python3 cluster/iTrop_wrapper.py" \
+--cluster-status "python3 cluster/iTrop_status.py" \
+--configfile "/shared/projects/elai_most/data/snakelai_out_all/config/config_snakelai_all.yaml"
+```
+
+```{bash}
+workdir=/shared/projects/elai_most/data/snakelai_out_all
+mkdir $workdir
+cd $workdir
+mkdir config
+```
+
+
+```{bash}
+cd /shared/projects/vietcaf/scripts/snakelai
+python -m venv venv
+source venv/bin/activate
+python -m pip install --upgrade pip
+pip install PyVCF
+pip install pandas
+pip install snakemake==6.5.0
+```
+
+```{bash}
+sbatch /shared/projects/elai_most/data/snakelai_out_all/config/submit_snakelai_all.sh
+```
+
+## Results
+see the file `lai_analysis_45VN.Rmd`
