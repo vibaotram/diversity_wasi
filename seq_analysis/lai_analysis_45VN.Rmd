@@ -17,7 +17,6 @@ library(karyoploteR)
 library(gt)
 library(gridExtra)
 library(ggpubr)
-library(data.table)
 ```
 
 # copy elai results from IFB to Itrop

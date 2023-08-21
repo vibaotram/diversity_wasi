@@ -215,6 +215,7 @@ pca1 <- all_pca_proj %>%
                  color = group, shape = group, size = group, alpha = group), 
              size = 5) +
   geom_text(aes(x = PC1, y = PC2, label = code, color = group), nudge_y = 1) +
+  # geom_text(aes(x = PC1, y = PC2, label = label, color = group)) +
   xlab(paste0("PC1 (", format(eigen[1]/sum(eigen)*100, digits = 2), "%)")) +
   ylab(paste0("PC2 (", format(eigen[2]/sum(eigen)*100, digits = 2), "%)")) +
   scale_color_manual(values = group6_col) + 
@@ -278,7 +279,11 @@ ggtree(nj_tree, layout = "dendrogram", color = "gray") %<+%
      select(-label)) +
   geom_tiplab(aes(label = labelm, color = group), 
               hjust = 1, vjust = 0.5, angle = 90,
-              linesize = .2, size = 3, align = F) +
+              linesize = .2, size = 3, align = F)
+
+ggtree(hclust(all_dist), ladderize = F) %<+% acc_info +
+  # geom_tiplab(aes(subset = grepl("S-", label), color = group), hjust = -0.5,
+  #             linesize = .2, size = 5) +
   geom_tippoint(aes(color = group), shape = 16, size = 3) +
   guides(color = guide_legend(title = "group")) +
   scale_shape_manual(values = 0:8) +
@@ -818,6 +823,7 @@ pca2 <- core6 %>%
   ggplot() +
   geom_point(aes(x = PC1, y = PC2, 
                  fill = group, shape = group, color = group), alpha = 0.7, size = 3) +
+                 # fill = group, shape = group, alpha = group, color = group, size = group)) +
   # geom_text(aes(x = PC1, y = PC2, label = label, color = group)) +
   xlab(paste0("PC1 (", format(eigen[1]/sum(eigen)*100, digits = 2), "%)")) +
   ylab(paste0("PC2 (", format(eigen[2]/sum(eigen)*100, digits = 2), "%)")) +
@@ -827,6 +833,9 @@ pca2 <- core6 %>%
   scale_shape_manual(values = c(group9_shape2, c(group9_shape2, "Vietnam core set" = 21))) +
   # scale_size_manual(values = c(rep(3, 9), 2)) +
   # scale_alpha_manual(values = c(rep(0.7, 9), 1)) +
+  scale_shape_manual(values = c(group9_shape2, c(group9_shape2, "Vietnam core set" = 8))) +
+  scale_size_manual(values = c(rep(3, 9), 2)) +
+  scale_alpha_manual(values = c(rep(1, 8), 0.7, 1)) +
   theme_minimal() + 
   theme(panel.border = element_rect(color = "gray", fill = NA),
         axis.title = element_text(size = 12))
@@ -869,6 +878,9 @@ tiff(filename = file.path(plotdir, "eval_core_6.tiff"),
      width = 9, height = 10, units = "in", res = 1200)
 # pdf(file.path(plotdir, "eval_core_6.pdf"),
 #      width = 8, height = 9)
+     # width = 8, height = 9, units = "in", res = 1200)
+pdf(file.path(plotdir, "eval_core_6.pdf"),
+     width = 8, height = 9)
 plot_grid(eval_plots, pca2, ncol = 1, labels = c("", "D"), rel_heights = c(0.6, 1))
 dev.off()
 ```

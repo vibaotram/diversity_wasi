@@ -31,9 +31,12 @@ acc_info <- read.delim("./raw_genotype/all_accessions_info.tsv")
 acc_info <- acc_info %>% arrange(code)
 
 all_geno <- read.delim("./raw_genotype/all_genotypes.tsv", row.names = 1)
-    all_geno <- all_geno[sort(rownames(all_geno)),]
+all_geno <- all_geno[sort(rownames(all_geno)),]
 
 plotdir <- "../plot_paper"
+all_geno <- all_geno[sort(rownames(all_geno)),]
+
+plotdir <- "./plot_paper"
 dir.create(plotdir, showWarnings = F)
 
 poppr::missingno(all_genind)
@@ -101,6 +104,9 @@ tiff(filename = file.path(plotdir, "pca_all.tiff"),
      width = 8, height = 7, units = "in", res = 800)
 pca1
 dev.off()
+=======
+# dev.off()
+>>>>>>> 938ad716f5259411b7fd5b8a8bc1adc639bf1cad
 
 ###################
 ## NJ clustering ##
@@ -453,6 +459,10 @@ sumdf %>%
   # geom_line(aes(x = pos/1e6, y = hexp), color = "red") +
   geom_col(aes(x = pos/1e6, y = hobs), color = "green") + 
   # geom_line(aes(x = pos/1e6, y = hobs), color = "green") +
+  geom_point(aes(x = pos/1e6, y = hexp), color = "red") + 
+  geom_line(aes(x = pos/1e6, y = hexp), color = "red") +
+  geom_point(aes(x = pos/1e6, y = hobs), color = "green") + 
+  geom_line(aes(x = pos/1e6, y = hobs), color = "green") +
   theme_minimal() + 
   scale_color_viridis_c()
 
@@ -503,3 +513,6 @@ ggtree(cg_vn_hclust, layout = "dendrogram") %<+% (acc_info %>% filter(code %in% 
   scale_shape_manual(values = 0:8) +
   scale_color_manual(values = group9_col[unique(cg_vn$group)])
 dev.off()
+
+bs_stats <- cbind("stat" = c("size", "allelic richness", "heterozygosity", "gene diversity", "Fis"),
+                  bs_stats)
