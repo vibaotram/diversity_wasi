@@ -16,13 +16,13 @@ library(adegenet)
 library(dartR)
 library(PopGenReport)
 library(hierfstat)
-library(ggtree)
 library(grid)
 library(factoextra)
 library(FactoMineR)
 library(sf)
 library(rnaturalearth)
 library(rnaturalearthdata)
+library(huxtable)
 
 #################
 ## import data ##
@@ -49,7 +49,7 @@ all_pca_proj <- all_pca_proj %>%
   as.data.frame() %>% 
   rownames_to_column("code") 
 
-all_pca_proj <- left_join(all_pca_proj, ref_info, by = "code")
+all_pca_proj <- left_join(all_pca_proj, acc_info, by = "code")
 
 all_pca_proj <- all_pca_proj %>% 
   mutate(group = ifelse(is.na(group), "Vietnam", group)) %>%
@@ -58,9 +58,19 @@ all_pca_proj <- all_pca_proj %>%
 
 eigen <- all_pca$eig[,1]
 
+## custom point style for each group
 group9_col <- c(turbo(5), turbo(4, begin = 0.1, end = 0.9)[-3], "gray50")
 names(group9_col) <- c("E", "O", "C", "A", "D", "R", "B", "G", "Vietnam")
 group9_col <- group9_col[c("D", "C", "G", "A", "B", "O", "R", "E", "Vietnam")]
+group9_size <- c(rep(4, 8), 3)
+names(group9_size) <- names(group9_col)
+group9_alpha <- c(rep(1, 8), 0.8)
+names(group9_alpha) <- names(group9_col)
+group9_shape <- rep(16, 9)
+names(group9_shape) <- names(group9_col)
+group9_shape["R"] <- 17
+group9_shape["B"] <- 18
+
 
 ## plot PCA results
 # tiff(filename = file.path(plotdir, "pca_all.tiff"),
@@ -68,17 +78,35 @@ group9_col <- group9_col[c("D", "C", "G", "A", "B", "O", "R", "E", "Vietnam")]
 pca1 <- all_pca_proj %>% 
   arrange(desc(group)) %>% 
   ggplot() +
-  geom_point(aes(x = PC1, y = PC2, color = group, shape = group), size = 5) +
+  geom_point(aes(x = PC1, y = PC2, color = group, shape = group, alpha = group, size = group)) +
   # geom_text(aes(x = PC1, y = PC2, label = label, color = group)) +
   xlab(paste0("PC1 (", format(eigen[1]/sum(eigen)*100, digits = 2), "%)")) +
   ylab(paste0("PC2 (", format(eigen[2]/sum(eigen)*100, digits = 2), "%)")) +
   scale_color_manual(values = group9_col) + 
-  scale_shape_manual(values = 0:8) +
+  scale_shape_manual(values = group9_shape) +
+  scale_alpha_manual(values = group9_alpha) + 
+  scale_size_manual(values = group9_size) +
   theme_minimal() + 
   theme(panel.border = element_rect(color = "gray", fill = NA),
         axis.title = element_text(size = 12))
 pca1
 # dev.off()
+
+all_pca_proj %>% 
+  filter(PC1 < -3) %>% 
+  arrange(desc(group)) %>% 
+  ggplot() +
+  geom_point(aes(x = PC1, y = PC2, color = group, shape = group, alpha = group, size = group)) +
+  # geom_text(aes(x = PC1, y = PC2, label = label, color = group)) +
+  xlab(paste0("PC1 (", format(eigen[1]/sum(eigen)*100, digits = 2), "%)")) +
+  ylab(paste0("PC2 (", format(eigen[2]/sum(eigen)*100, digits = 2), "%)")) +
+  scale_color_manual(values = group9_col) + 
+  scale_shape_manual(values = group9_shape) +
+  scale_alpha_manual(values = group9_alpha) + 
+  scale_size_manual(values = group9_size) +
+  theme_minimal() + 
+  theme(panel.border = element_rect(color = "gray", fill = NA),
+        axis.title = element_text(size = 12))
 
 ###################
 ## NJ clustering ##
@@ -94,14 +122,7 @@ nj_tree <- ape::nj(all_dist)
 group6_col <- group9_col
 group6_col["R"] <- group6_col["E"]
 group6_col["B"] <- group6_col["O"]
-group9_size <- c(rep(4, 8), 3)
-names(group9_size) <- names(group9_col)
-group9_alpha <- c(rep(1, 8), 0.8)
-names(group9_alpha) <- names(group9_col)
-group9_shape <- rep(16, 9)
-names(group9_shape) <- names(group9_col)
-group9_shape["R"] <- 17
-group9_shape["B"] <- 18
+
 
 nj1 <- ggtree(nj_tree, ladderize = F, layout = "ape", color = "gray") %<+% acc_info +
   # geom_tiplab(aes(subset = grepl("S-", label), color = group), hjust = -0.5,
@@ -379,23 +400,27 @@ dev.off()
 ################
 ## statistics ##
 ################
-## redundancy
-vn_all_diss <- poppr::diss.dist(all_genind[all_genind@pop == "Vietnam"])
-hist(vn_all_diss)
-vn_all_diss <- as.matrix(vn_all_diss)
-vn_all_diss[sapply(1:nrow(vn_all_diss), function(r) any(vn_all_diss[r,-r] == 0)),
-            sapply(1:ncol(vn_all_diss), function(c) any(vn_all_diss[-c,c] == 0))]
 
 
-## 
+## data
 all_df <- all_geno
 all_df[all_df == 0] <- 11
 all_df[all_df == 1] <- 12
 all_df[all_df == 2] <- 22
 all_genind <- df2genind(all_df, ncode = 1, pop = acc_info$group)
 all_genind@strata <- acc_info
+grp_df <- cbind(pop = all_genind@pop, all_geno)
 
-all_sum <- summary(grp_genind)
+## redundancy
+vn_all_diss <- poppr::diss.dist(all_genind[all_genind@pop == "Vietnam"])
+hist(vn_all_diss)
+vn_all_diss <- as.matrix(vn_all_diss)
+## identical genotypes
+vn_all_diss[sapply(1:nrow(vn_all_diss), function(r) any(vn_all_diss[r,-r] == 0)),
+            sapply(1:ncol(vn_all_diss), function(c) any(vn_all_diss[-c,c] == 0))]
+
+## individual diversity
+all_sum <- summary(all_genind)
 sumdf <- data.frame(hobs = all_sum$Hobs,
                     hexp = all_sum$Hexp)
 
@@ -406,7 +431,7 @@ sumdf %>%
   ggplot() + 
   facet_grid(rows = vars(chrom)) +
   geom_point(aes(x = pos/1e6, y = hobs, color = hobs)) + 
-  geom_line(aes(x = pos/1e6, y = hobs)) +
+  # geom_line(aes(x = pos/1e6, y = hobs)) +
   theme_minimal() + 
   scale_color_viridis_c()
 
@@ -417,7 +442,7 @@ sumdf %>%
   ggplot() + 
   facet_grid(rows = vars(chrom)) +
   geom_point(aes(x = pos/1e6, y = hexp, color = hexp)) + 
-  geom_line(aes(x = pos/1e6, y = hexp)) +
+  # geom_line(aes(x = pos/1e6, y = hexp)) +
   theme_minimal() + 
   scale_color_viridis_c()
 
@@ -434,22 +459,46 @@ sumdf %>%
   theme_minimal() + 
   scale_color_viridis_c()
 
+## allele count
+ac <- allele.count(grp_df)
 
-grp_df <- cbind(pop = grp_genind@pop, grp_geno)
-ar <- allelic.richness(grp_df)
-format(colMeans(ar$Ar), digits = 3)
+
+## allelic richness
+ar <- allel.rich(all_genind)
+ar$mean.richness
+
+
 
 all_bs <- basic.stats(grp_df)
 all_bs$Fis
 Fis <- fis.dosage(all_geno, pop = acc_info$group)
 
+fst <- fst.dosage(all_geno, pop = acc_info$group)
 
-
-bs_stats <- as.data.frame(rbind(as.numeric(sprintf("%d", all_sum$n.by.pop)),
-                                as.numeric(sprintf("%.2f", colMeans(ar$Ar))),
-                                as.numeric(sprintf("%.2f", colMeans(all_bs$Ho))),
-                                as.numeric(sprintf("%.2f", colMeans(all_bs$Hs))),
-                                as.numeric(sprintf("%.2f", Fis[colnames(ar$Ar)]))))
-colnames(bs_stats) <- colnames(all_bs$Ho)
-bs_stats <- cbind("stat" = c("size", "allelic richness", "heterozygosity", "gene diversity", "Fis"),
+grp_ord <- c("D", "C", "G", "A", "B", "O", "R", "E", "Vietnam")
+bs_stats <- as.data.frame(rbind(sprintf("%d", all_sum$n.by.pop[grp_ord]),
+                                sprintf("%.2f", ar$mean.richness[grp_ord]),
+                                sprintf("%.2f", colMeans(all_bs$Ho)[grp_ord]),
+                                sprintf("%.2f", colMeans(all_bs$Hs)[grp_ord]),
+                                sprintf("%.2f", Fis[grp_ord])))
+colnames(bs_stats) <- grp_ord
+bs_stats <- cbind("Statistics" = c("N", "AR", "Ho", "He", "Fis"),
                   bs_stats)
+bs_stats
+
+
+bs_stats %>% 
+  hux() %>% 
+  set_bottom_border(1, everywhere) %>% 
+  set_right_border(everywhere, 1) %>% 
+  set_header_cols(1, TRUE) %>%
+  style_headers(bold = TRUE, text_color = "black") %>% 
+  set_align(everywhere, everywhere, "center") %>% 
+  # set_background_color(everywhere, everywhere, "gray70") %>% 
+  # set_text_color(1, 2:10, group9_col) %>% 
+  # set_text_color(everywhere, 2:10, mapply(rep, group9_col, nrow(bs_stats)+1)) %>% 
+  # set_background_color(1, everywhere, "gray80") %>% 
+  set_text_color(1, 2:10, group9_col) %>%
+  quick_docx(file = "statistics.docx")
+  # quick_html(file = "statistics.html")
+
