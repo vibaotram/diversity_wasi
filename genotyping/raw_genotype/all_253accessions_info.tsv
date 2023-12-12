@@ -1,0 +1,254 @@
+code	group	data	name	collection	country	pop	lat	long	snp_group	platform	other_name
+BGQ07	A	seq	111	Meise	Gabon	PN Loango	-2.041333	9.537499	A	NIHS	
+20708	A	seq	20708	CNRA	Togo	Niaouli	NA	NA	A	MGX	
+20723	A	seq	20723	CNRA	Congo	SembeSouanke 	1.933	14.183	A	MGX	
+20715_array	A	array		CNRA							
+CNRA4A3_array	A	array		CNRA							
+K9_34_3_array	A	array		ICCRI							
+FRT81_array	A	array		Nestlé							
+FRT83_array	A	array		Nestlé							
+20724_kasp	A	array		CNRA	Congo	SembeSouanke 					D12-14 L13-14
+20725_kasp	A	array		CNRA							D12-14 L13-16
+20693_kasp	A	array		CNRA	Togo	Niaouli					D12-14 L16-2
+20695_kasp	A	array		CNRA	Togo	Niaouli					D12-14 L17-3
+20511	B	seq	20511	CNRA	RCA	Doungba	5.067414	20.674931	B	MGX	
+20502_array	B	array		CNRA							
+20555_kasp	B	array		CNRA	Centrafrique	Libengue					D12-14 L22-12
+20583_kasp	B	array		CNRA	Centrafrique	Libengue					D12-14 L24-10
+29054	C	seq	29054	CNRA	RCA	Ndongue	5.485614	15.510499	C	NIHS	
+20683	C	seq	20683	CNRA	Cameroon	Nguilili	2.06	15.6	C	NIHS	
+BGQ08	C	seq	1765	Meise	RCA	Sangha	2.35	16.15	C	NIHS	
+20685	C	seq	20685	CNRA	Cameroon	Bombi	4.93	13.5	C	NIHS	
+20656	C	seq	20656	CNRA	Cameroon	Nguila	4.716	11.66	C	NIHS	
+29004	C	seq	29004	CNRA	RCA	Ndongue	5.485614	15.510499	C	NIHS	
+20658	C	seq	20658	CNRA	Cameroon	Nguila	4.716	11.66	C	MGX	
+D12_11_L29_15_array	C	array	20683	CNRA							D12-14 L29-15
+20716_kasp	C	array		CNRA	Congo	Ouesso 2					D12-14 L12-16
+20667_kasp	C	array		CNRA	Cameroun	Moloundou 4					D12-14 L28-4
+20803	D	seq	20803	CNRA	Guinea	Piné	8.57	-8.06	D	NIHS	
+20233	D	seq	20233	CNRA	CI	Fouroubankoro	8.29	-5.45	D	NIHS	
+20245	D	seq	20245	CNRA	CI	Marahoue	7.11	-6.04	D	NIHS	
+20121	D	seq	20121	CNRA	CI	Gbapleu	7.34	-8.18	D	NIHS	
+2931	D	seq	2931	CNRA	CI	Moniadougou	7.921969	-6.702433	D	NIHS	
+BGQ10	D	seq	2239	Meise	Ghana	Bia NP	6.389999	-3.004722	D	NIHS	
+20135	D	seq	20135	CNRA	CI	Gao	6.57	-7.39	D	MGX	
+20159	D	seq	20159	CNRA	CI	Ira2	7.5	-7.42	D	MGX	
+20145_kasp	D	array		CNRA	Côte d'Ivoire	Bossematie					D12-11 L19-9
+20336_kasp	D	array		CNRA	Côte d'Ivoire	Gbapleu 3					D12-14 L2-13
+20354_kasp	D	array		CNRA	Côte d'Ivoire	Sabregue					D12-14 L4-7
+20362_kasp	D	array		CNRA	Côte d'Ivoire	Pelezi 2					D12-14 L5-1
+20366_kasp	D	array		CNRA	Côte d'Ivoire	Pelezi 2					D12-14 L5-10
+20395_kasp	D	array		CNRA	Côte d'Ivoire	Pelezi 3					D12-14 L8-1
+20406_kasp	D	array		CNRA	Côte d'Ivoire	Gonate					D12-14 L8-20
+20516	E	seq	20516	CNRA	RCA	Yombi	3.892123	18.45078	E	NIHS	
+20738	E	seq	20738	CNRA	Congo	Impfondo Dongou 1	1.586662	17.845006	E	NIHS	
+20650	E	seq	20650	CNRA	Cameroon	Koto	4.22	9.34	E	MGX	
+20731	E	seq	20731	CNRA	Congo	Boyele 5	2.211619	17.899349	E	MGX	
+20319_kasp	E	array		CNRA	Côte d'Ivoire	Gbapleu 1					D12-14 L1-1
+Boim_7	G	seq	Boim7	INCA	Angola	Anboim	-10.026258	14.191458	G	NIHS	
+Briz_2	G	seq	Briz2	INCA	Angola	Ambriz	-8.179469	14.224086	G	NIHS	
+Amboim01_array	G	array		ClassM							
+Amboim02_array	G	array		ClassM							
+Amboim04_array	G	array		ClassM							
+Amboim05_array	G	array		ClassM							
+Amboim08_array	G	array		ClassM							
+Amboim09_array	G	array		ClassM							
+Amboim10_array	G	array		ClassM							
+Ambriz01_array	G	array		ClassM							
+Ambriz03_array	G	array		ClassM							
+Ambriz04_array	G	array		ClassM							
+Ambriz05_array	G	array		ClassM							
+Ambriz06_array	G	array		ClassM							
+Ambriz07_array	G	array		ClassM							
+Ambriz08_array	G	array		ClassM							
+Ambriz09_array	G	array		ClassM							
+AnaMaria02_array	G	array		ClassM							
+AnaMaria03_array	G	array		ClassM							
+AnaMaria04_array	G	array		ClassM							
+AnaMaria05_array	G	array		ClassM							
+AnaMaria07_array	G	array		ClassM							
+AnaMaria08_array	G	array		ClassM							
+AnaMaria09_array	G	array		ClassM							
+BUD15	O	seq	BU-D15	Alex	Ug	Budango	1.915651	31.725715	O	Cornell	
+Can33	O	seq	Can33	Meise	RDC	Epulu	1.39855	28.56766667	B	NIHS	
+ZK2_5	O	seq	ZK2-5	NARO	Ug	Zoka	3.131636094	31.65631864	B	NIHS	
+ML5_1	hybrid	seq	ML5-1	NARO	Ug	Malabigambo	-0.91163001	31.5971783	hb	O	NIHS
+ML3_3	hybrid	seq	ML3-3	NARO	Ug	Malabigambo	-0.876476369	31.75704153	hb	O	NIHS
+MB5_5	hybrid	seq	MB5-5	NARO	Ug	Mabira	0.468134474	32.91055197	hb	O	NIHS
+MB3_1	O	seq	MB3-1	NARO	Ug	Mabira	-0.87633161078526	31.7569337492095	O	NIHS	
+M1413	hybrid	seq	M_1413	Meise	RDC	Gimbi	-5.51666666666666	13.3666666666666	hb	NA	NIHS
+M1400	hybrid	seq	M_1400	Meise	RDC	Lusambo	-4.96666666666666	23.4333333333333	hb	E	NIHS
+BD5_1	O	seq	BD5-1	NARO	Ug	Budongo	1.63725739915758	31.4073512256068	O	NIHS	
+KL5_2	hybrid	seq	KL5-2	NARO	Ug	Kalangala	-0.277630538	32.13986494	hb	O	NIHS
+KL1_2	hybrid	seq	KL1-2	NARO	Ug	Kalangala	-0.313303073	32.30114366	hb	O	NIHS
+KB2_1	O	seq	KB2-1	NARO	Ug	Kibale	0.48149183772995	30.4364210469026	O	NIHS	
+IT1_1	O	seq	IT1-1	NARO	Ug	Itwara	0.820386404735189	30.4343283800416	O	NIHS	
+M1361	O	seq	M_1361	Meise	RDC	Balo, Lac Albert	1.566667	30.533333	O	NIHS	
+Can36	hybrid	seq	Can36	Meise	RDC	Epulu	1.3667	28.55	hb	B	NIHS
+Can34	hybrid	seq	Can34	Meise	RDC	Epulu	1.3999	28.6024833333333	hb	NA	NIHS
+ZO16	O	seq	ZO-16	Alex	Ug	Zoka	3.120655	31.651186	O	BGI	
+Can12	hybrid	seq	Can12	Meise	RDC	Epulu	1.3988	28.5691666666666	hb	EB	NIHS
+C031_BGQ23	hybrid	seq	Ramasoni3	Meise	RDC	Isalowe	0.805	24.5	hb	B	NIHS
+BGQ21	hybrid	seq	Nt Core 825	Meise	RDC	Yangambi	0.805	24.5	hb	B	NIHS
+BGQ09	hybrid	seq	282	Meise	Cameroon	Moliwé	4.058611	9.228055	hb	E	NIHS
+BGQ06	hybrid	seq	935	Meise	Angola	Santa Cruz	-6.91667	16.35	hb	G	NIHS
+BGQ02	hybrid	seq	110	Meise	RDC	Yangambi	1.12166666666666	25.1283333333333	hb	O	NIHS
+20852	hybrid	seq	20852	CNRA	Guinea	Kouyo	8.5	-10.516667	hb	E	NIHS
+20726	hybrid	seq	20726	CNRA	Congo	SouankeGabon	2.07	14	hb	E	NIHS
+BD2_2_array	O	array		NARO							
+BD3_1_array	O	array		NARO							
+BD3_2_array	O	array		NARO							
+BD4_5_array	O	array		NARO							
+BD5_2_array	O	array		NARO							
+BD5-4_array	O	array		NARO							
+IT2_1_array	O	array		NARO							
+IT3_1_array	O	array		NARO							
+IT3_4_array	O	array		NARO							
+IT4_1_array	O	array		NARO							
+IT5_1_array	O	array		NARO							
+KB1_4_array	O	array		NARO							
+KB1_5_array	O	array		NARO							
+KB2_4_array	O	array		NARO							
+KB3_1_array	O	array		NARO							
+KB4_1_array	O	array		NARO							
+KB4-4_array	O	array		NARO							
+ML6_3_array	O	array		NARO							
+ZK2_1_array	O	array		NARO							
+ZK2_4_array	O	array		NARO							
+ZK3_3_array	O	array		NARO							
+ZK4_3_array	O	array		NARO							
+ZK4_5_array	O	array		NARO							
+ZK5_1_array	O	array		NARO							
+20504	R	seq	20504	CNRA	RCA	Doungba	5.067	20.675	E	BGI	
+BP409	R	seq	BP409	ICCRI	Indonesia	NA	NA	NA	E	NIHS	
+20662	R	seq	20662	CNRA	Cameroon	Mwamepen	3.29	14.48	E	NIHS	
+K4Y17Y2	R	seq	K4Y17Y2	ICCRI	RDC	Sankuru	-2.677827	24.334999	R	MGX	
+K5_73_4_array	R	array		ICCRI							
+K6_38_4_array	R	array		ICCRI							
+K4_28_4_array	R	array		ICCRI							
+TR10m	Vietnam										
+TR11m	Vietnam										
+TR12m	Vietnam										
+TR13m	Vietnam										
+TR14m	Vietnam										
+TR15m	Vietnam										
+TR4m	Vietnam										
+TR5m	Vietnam										
+TR6m	Vietnam										
+TR9m	Vietnam										
+S-1	Vietnam										
+S-2	Vietnam										
+S-3	Vietnam										
+S-4	Vietnam										
+S-5	Vietnam										
+S-6	Vietnam										
+S-7	Vietnam										
+S-8	Vietnam										
+S-9	Vietnam										
+S-10	Vietnam										
+S-11	Vietnam										
+S-12	Vietnam										
+S-13	Vietnam										
+S-14	Vietnam										
+S-15	Vietnam										
+S-16	Vietnam										
+S-17	Vietnam										
+S-18	Vietnam										
+S-19	Vietnam										
+S-20	Vietnam										
+S-21	Vietnam										
+S-22	Vietnam										
+S-23	Vietnam										
+S-24	Vietnam										
+S-25	Vietnam										
+S-26	Vietnam										
+S-27	Vietnam										
+S-28	Vietnam										
+S-29	Vietnam										
+S-30	Vietnam										
+S-31	Vietnam										
+S-32	Vietnam										
+S-33	Vietnam										
+S-34	Vietnam										
+S-36	Vietnam										
+S-37	Vietnam										
+S-38	Vietnam										
+S-39	Vietnam										
+S-40	Vietnam										
+S-41	Vietnam										
+S-45	Vietnam										
+S-46	Vietnam										
+S-47	Vietnam										
+S-48	Vietnam										
+S-49	Vietnam										
+S-50	Vietnam										
+S-51	Vietnam										
+S-52	Vietnam										
+S-58	Vietnam										
+S-62	Vietnam										
+S-63	Vietnam										
+S-64	Vietnam										
+S-65	Vietnam										
+S-66	Vietnam										
+S-67	Vietnam										
+S-68	Vietnam										
+S-69	Vietnam										
+S-70	Vietnam										
+S-71	Vietnam										
+S-72	Vietnam										
+S-73	Vietnam										
+S-74	Vietnam										
+S-75	Vietnam										
+S-76	Vietnam										
+S-77	Vietnam										
+S-78	Vietnam										
+S-79	Vietnam										
+S-80	Vietnam										
+S-81	Vietnam										
+S-82	Vietnam										
+S-83	Vietnam										
+S-84	Vietnam										
+S-85	Vietnam										
+S-86	Vietnam										
+S-87	Vietnam										
+S-88	Vietnam										
+S-89	Vietnam										
+S-90	Vietnam										
+S-91	Vietnam										
+S-92	Vietnam										
+S-93	Vietnam										
+S-94	Vietnam										
+S-95	Vietnam										
+S-96	Vietnam										
+S-97	Vietnam										
+S-98	Vietnam										
+S-99	Vietnam										
+S-100	Vietnam										
+S-101	Vietnam										
+S-102	Vietnam										
+S-103	Vietnam										
+S-104	Vietnam										
+S-105	Vietnam										
+S-106	Vietnam										
+S-120	Vietnam										
+S-121	Vietnam										
+S-122	Vietnam										
+S-134	Vietnam										
+S-135	Vietnam										
+S-137	Vietnam										
+S-139	Vietnam										
+S-140	Vietnam										
+S-141	Vietnam										
+S-142	Vietnam										
+S-143	Vietnam										
+S-148	Vietnam										
+S-149	Vietnam										
+S-150	Vietnam										
+S-151	Vietnam										
+S-152	Vietnam										
+S-153	Vietnam										
+S-154	Vietnam										
+S-155	Vietnam										
+S-156	Vietnam										
+S-157	Vietnam										
+S-158	Vietnam										

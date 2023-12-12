@@ -128,6 +128,8 @@ group9_col <- group9_col[c("D", "C", "G", "A", "B", "O", "R", "E", "Vietnam")]
 group6_col <- group9_col
 group6_col["R"] <- group6_col["E"]
 group6_col["B"] <- group6_col["O"]
+group5_col <- group6_col
+group5_col["G"] <- group5_col["A"]
 group9_size <- c(rep(6, 8), 4)
 names(group9_size) <- names(group9_col)
 group9_size2 <- c(rep(3, 8), 5, 5)
@@ -1340,7 +1342,7 @@ afmap +
 
 ```{r african_map}
 afmap <- ggplot(data = africa) +
-  geom_sf(fill = "white", color = "grey40", size = 0.3) +
+  geom_sf(fill = "white", color = "black", size = 0.3) +
   coord_sf(xlim = c(-15, 35), ylim = c(-18, 13), expand = TRUE) +
   geom_point(data = group_coord,
             aes(x = x_mean, y = y_mean, fill = group, color = group, size = group),
@@ -1360,9 +1362,9 @@ afmap <- ggplot(data = africa) +
   theme(legend.box.margin = margin(l = 20), 
         legend.key.size = unit(14, "pt"),
         legend.key.height = unit(15, "pt")) +
-  scale_color_manual(values = group6_col) +
-  scale_fill_manual(values = group6_col) + 
-  scale_size_manual(values = c(25, 25, 25, 25, 50, 20, 20))
+  scale_color_manual(values = group5_col[-9]) +
+  scale_fill_manual(values = group5_col[-9]) + 
+  scale_size_manual(values = c(25, 25, 25, 25, 50, 30, 30, 20))
 ```
 
 

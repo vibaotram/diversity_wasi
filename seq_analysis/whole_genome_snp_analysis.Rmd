@@ -225,6 +225,7 @@ import vcf file in R
 ```{r}
 vcf_thin <- "./snps_data/all_final_thin5000_maf002.recode.vcf"
 vcf_thin <- "/shared/projects/afrob_seq/wgs_snp/vcf_bgi_2021/gbp_output/filtered_vcf_by_chrom/af_final_maf005_thin5k_60inds.recode.vcf"
+vcf_thin <- "/shared/projects/afrob_seq/wgs_snp/vcf_bgi_2021/gbp_output/filtered_vcf_by_chrom/all_final_thin5000_maf005.recode.vcf"
 snp_thin <- read.vcfR(vcf_thin)
 snp_thin@fix[,1] <- gsub("\\.", "_", snp_thin@fix[,1])
 ```
@@ -303,6 +304,7 @@ snmf for the whole set, with K = 5
 # all_snmf <- snmf(all_geno_file, K = 1:10, repetitions = 10, CPU = 1, 
 all_snmf <- snmf(all_geno_file, K = 1:10, repetitions = 10, CPU = 20, 
                  entropy = T, project = "new", seed = 11)
+all_snmf <- load.snmfProject("./snmf/thin_all.snmfProject")
 plot(all_snmf)
 ```
 
