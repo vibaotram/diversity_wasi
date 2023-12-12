@@ -17,6 +17,8 @@ library(karyoploteR)
 library(gt)
 library(gridExtra)
 library(ggpubr)
+library(S4Vectors)
+library(aplot)
 ```
 
 # copy elai results from IFB to Itrop
@@ -30,6 +32,7 @@ rsync -vaurRP baotram@core.cluster.france-bioinformatique.fr:/shared/projects/el
 elai_outdir <- "/data/projects/rob/data/most_elai/elai_out"
 source_dir <- file.path(elai_outdir, "source")
 plot_dir <- "/data/projects/rob/data/most_elai/plots"
+plot_dir <- "/shared/projects/elai_most/diversity_wasi/plot_paper"
 ```
 
 # list of individuals
@@ -176,6 +179,9 @@ gtsave(t, file.path(plot_dir, "global_ancestry_elai.pdf"))
 gt <- as_ggplot(t, vwidth = 2400, vheight = 2000)
 ```
 
+```{r}
+write.table(global, "global_lai.tsv", sep = "\t")
+```
 
 ## correlation between lai and snmf global inference
 ```{r}
@@ -266,6 +272,42 @@ legend("right", #x = 0.9, y = 0.4, #"bottomright", #  yjust = .5, xjust = 0, #
 dev.off()
 ```
 
+```{r}
+adm_blocks %>% 
+  pivot_longer(cols = OB:ER, names_to = "ancestry", values_to = "proportion") %>% 
+  mutate(start = start/1e6,
+         end = end/1e6,
+         individual = factor(individual, 
+                             levels = adm_order)) %>% 
+  group_by(chromosome, start, end, individual) %>% 
+  mutate(proportion_min = cum_min(proportion),
+         proportion_max = cum_max(proportion)) %>% 
+  filter(individual %in% inds_AG) %>% 
+  ggplot() + 
+  facet_grid(rows = vars(individual), cols = vars(chromosome),
+             scale = "free_x", space = "free_x", switch = "x", shrink = F) + 
+  geom_rect(aes(xmin = start, xmax = end,
+                ymin = proportion_min, ymax = proportion_max,
+                fill = ancestry),
+            show.legend = F) +
+  scale_fill_manual(values = group_col, na.value = "gray") +
+  theme_minimal() + 
+  theme(panel.grid = element_blank(), 
+        axis.ticks = element_line(),
+        axis.text.y = element_blank(),
+        strip.background.x = element_rect(fill = "#dadde6", color = "#dadde6"),
+        strip.background.y = element_rect(fill = NA, color = NA),
+        # strip.background.y = element_rect(fill = "#dadde6", color = "#dadde6"),
+        strip.placement = "outside",
+        strip.text.y = element_text(angle = 0, h = 0),
+        panel.spacing.x = unit(4, "pt"), 
+        panel.spacing.y = unit(0.5, "pt"), 
+        panel.background = element_rect(fill = "gray60", color = "white")) +
+  scale_y_continuous(breaks = 0.5) +
+  scale_x_continuous(breaks = seq(0, 80, 10), expand = c(0, 0)) +
+  xlab("Position (Mb)") + ylab("Ancestry assignment")
+```
+
 
 ## plot all genomes admixed with D > 10%
 
@@ -318,6 +360,42 @@ legend("right", #x = 0.9, y = 0.4, #"bottomright", #  yjust = .5, xjust = 0, #
        title = "ancestry", legend = c(gsub("group_", "", names(group_col)), "undetermined"), 
        fill = c(group_col, "grey90"), bty = "n", xjust = 0, cex = 1.2)
 dev.off()
+```
+
+```{r}
+adm_blocks %>% 
+  pivot_longer(cols = OB:ER, names_to = "ancestry", values_to = "proportion") %>% 
+  mutate(start = start/1e6,
+         end = end/1e6,
+         individual = factor(individual, 
+                             levels = adm_order)) %>% 
+  group_by(chromosome, start, end, individual) %>% 
+  mutate(proportion_min = cum_min(proportion),
+         proportion_max = cum_max(proportion)) %>% 
+  filter(individual %in% inds_D) %>% 
+  ggplot() + 
+  facet_grid(rows = vars(individual), cols = vars(chromosome),
+             scale = "free_x", space = "free_x", switch = "x", shrink = F) + 
+  geom_rect(aes(xmin = start, xmax = end,
+                ymin = proportion_min, ymax = proportion_max,
+                fill = ancestry),
+            show.legend = F) +
+  scale_fill_manual(values = group_col, na.value = "gray") +
+  theme_minimal() + 
+  theme(panel.grid = element_blank(), 
+        axis.ticks = element_line(),
+        axis.text.y = element_blank(),
+        strip.background.x = element_rect(fill = "#dadde6", color = "#dadde6"),
+        strip.background.y = element_rect(fill = NA, color = NA),
+        # strip.background.y = element_rect(fill = "#dadde6", color = "#dadde6"),
+        strip.placement = "outside",
+        strip.text.y = element_text(angle = 0, h = 0),
+        panel.spacing.x = unit(4, "pt"), 
+        panel.spacing.y = unit(0.5, "pt"), 
+        panel.background = element_rect(fill = "gray60", color = "white")) +
+  scale_y_continuous(breaks = 0.5) +
+  scale_x_continuous(breaks = seq(0, 80, 10), expand = c(0, 0)) +
+  xlab("Position (Mb)") + ylab("Ancestry assignment")
 ```
 
 ## plot all genomes pure E
@@ -374,6 +452,7 @@ dev.off()
 
 
 ```
+
 
 
 ## plot all the other genomes
@@ -433,6 +512,41 @@ legend("right", #x = 0.9, y = 0.4, #"bottomright", #  yjust = .5, xjust = 0, #
 dev.off()
 ```
 
+```{r}
+adm_blocks %>% 
+  pivot_longer(cols = OB:ER, names_to = "ancestry", values_to = "proportion") %>% 
+  mutate(start = start/1e6,
+         end = end/1e6,
+         individual = factor(individual, 
+                             levels = adm_order)) %>% 
+  group_by(chromosome, start, end, individual) %>% 
+  mutate(proportion_min = cum_min(proportion),
+         proportion_max = cum_max(proportion)) %>% 
+  filter(individual %in% inds_other[!inds_other %in% ind_3adm]) %>% 
+  ggplot() + 
+  facet_grid(rows = vars(individual), cols = vars(chromosome),
+             scale = "free_x", space = "free_x", switch = "x", shrink = F) + 
+  geom_rect(aes(xmin = start, xmax = end,
+                ymin = proportion_min, ymax = proportion_max,
+                fill = ancestry),
+            show.legend = F) +
+  scale_fill_manual(values = group_col, na.value = "gray") +
+  theme_minimal() + 
+  theme(panel.grid = element_blank(), 
+        axis.ticks = element_line(),
+        axis.text.y = element_blank(),
+        strip.background.x = element_rect(fill = "#dadde6", color = "#dadde6"),
+        strip.background.y = element_rect(fill = NA, color = NA),
+        # strip.background.y = element_rect(fill = "#dadde6", color = "#dadde6"),
+        strip.placement = "outside",
+        strip.text.y = element_text(angle = 0, h = 0),
+        panel.spacing.x = unit(4, "pt"), 
+        panel.spacing.y = unit(0.5, "pt"), 
+        panel.background = element_rect(fill = "gray60", color = "white")) +
+  scale_y_continuous(breaks = 0.5) +
+  scale_x_continuous(breaks = seq(0, 80, 10), expand = c(0, 0)) +
+  xlab("Position (Mb)") + ylab("Ancestry assignment")
+```
 
 ## plot only 3-way admixed individuals
 ```{r}
@@ -482,6 +596,42 @@ legend("right", #x = 0.9, y = 0.4, #"bottomright", #  yjust = .5, xjust = 0, #
 dev.off()
 ```
 
+```{r}
+adm_blocks %>% 
+  pivot_longer(cols = OB:ER, names_to = "ancestry", values_to = "proportion") %>% 
+  mutate(start = start/1e6,
+         end = end/1e6,
+         individual = factor(individual, 
+                             levels = adm_order)) %>% 
+  group_by(chromosome, start, end, individual) %>% 
+  mutate(proportion_min = cum_min(proportion),
+         proportion_max = cum_max(proportion)) %>% 
+  filter(individual %in% ind_3adm) %>% 
+  ggplot() + 
+  facet_grid(rows = vars(individual), cols = vars(chromosome),
+             scale = "free_x", space = "free_x", switch = "x", shrink = F) + 
+  geom_rect(aes(xmin = start, xmax = end,
+                ymin = proportion_min, ymax = proportion_max,
+                fill = ancestry),
+            show.legend = F) +
+  scale_fill_manual(values = group_col, na.value = "gray") +
+  theme_minimal() + 
+  theme(panel.grid = element_blank(), 
+        axis.ticks = element_line(),
+        axis.text.y = element_blank(),
+        strip.background.x = element_rect(fill = "#dadde6", color = "#dadde6"),
+        strip.background.y = element_rect(fill = NA, color = NA),
+        # strip.background.y = element_rect(fill = "#dadde6", color = "#dadde6"),
+        strip.placement = "outside",
+        strip.text.y = element_text(angle = 0, h = 0),
+        panel.spacing.x = unit(4, "pt"), 
+        panel.spacing.y = unit(0.5, "pt"), 
+        panel.background = element_rect(fill = "gray60", color = "white")) +
+  scale_y_continuous(breaks = 0.5) +
+  scale_x_continuous(breaks = seq(0, 80, 10), expand = c(0, 0)) +
+  xlab("Position (Mb)") + ylab("Ancestry assignment")
+```
+
 ## averaged signals of admixed individuals
 
 
@@ -517,19 +667,20 @@ avg_plot <- avg_local %>%
          set = "") %>% 
   pivot_longer(cols = OB:ER, names_to = "ancestry", values_to = "proportion") %>% 
   ggplot() + 
-  facet_grid(cols = vars(chromosome), rows = vars(set), scale = "free", space = "free", switch = "x") + 
+  facet_grid(cols = vars(chromosome), scale = "free", space = "free", switch = "x") + 
   geom_line(aes(x = position, y = proportion, color = ancestry), show.legend = F) +
   scale_color_manual(values = group_col) +
   theme_minimal() + 
   theme(panel.grid.minor = element_blank(), 
         axis.ticks = element_line(),
+        axis.title = element_text(size = 14),
         # panel.grid.major.y = element_blank(),
         strip.background.x = element_rect(fill = "#dadde6", color = "#dadde6"),
         strip.background.y = element_rect(fill = NA, color = NA),
-        strip.text.y = element_text(angle = 0, h = 0),
+        strip.text.x = element_text(size = 14),
         strip.placement = "outside") +
   scale_x_continuous(breaks = seq(0, 80, 10)) +
-  xlab("Position (Mb)") + ylab("Average ancestry proportion")
+  xlab("Position (Mb)") + ylab("Average proportion")
 avg_plot
 ggsave("./plots/averaged_admixture_signals.pdf", width = 15, height = 4)
 ```
@@ -576,6 +727,8 @@ cum_max(c(0,0.5,0.5,0,0))
 ind_order <- unique(c(inds_ER, inds_other[!inds_other %in% ind_3adm], 
                       inds_AG, inds_D, ind_3adm))
 
+
+all_windows_large <- all_chr[width(all_chr) > 1e6,]
 all_blocks <- mcols(all_windows_large) %>% 
   as.data.frame() %>% 
   mutate(chromosome = unlist(mapply(rep, 
@@ -605,6 +758,7 @@ lai_plot <- all_blocks %>%
   theme(panel.grid = element_blank(), 
         axis.ticks = element_line(),
         axis.text.y = element_blank(),
+        axis.title = element_text(size = 14),
         strip.background.x = element_rect(fill = "#dadde6", color = "#dadde6"),
         strip.background.y = element_rect(fill = NA, color = NA),
         # strip.background.y = element_rect(fill = "#dadde6", color = "#dadde6"),
@@ -637,6 +791,7 @@ adm_blocks <- mcols(all_windows_large) %>%
   filter(individual %in% adm_order)
 
 lai_amd_plot <- adm_blocks %>% 
+  # filter(individual == "S-75") %>%
   pivot_longer(cols = OB:ER, names_to = "ancestry", values_to = "proportion") %>% 
   mutate(start = start/1e6,
          end = end/1e6,
@@ -655,32 +810,28 @@ lai_amd_plot <- adm_blocks %>%
   theme_minimal() + 
   theme(panel.grid = element_blank(), 
         axis.ticks = element_line(),
+        axis.title.y = element_text(size = 14, vjust = 1),
         axis.text.y = element_blank(),
         strip.background.x = element_rect(fill = "#dadde6", color = "#dadde6"),
         strip.background.y = element_rect(fill = NA, color = NA),
         # strip.background.y = element_rect(fill = "#dadde6", color = "#dadde6"),
         strip.placement = "outside",
-        strip.text.y = element_text(angle = 0, h = 0),
+        strip.text.y = element_text(size = 14, angle = 0, v = 0.5, h = 0),
+        strip.text.x = element_text(size = 14),
+        axis.title.x = element_text(size = 14, vjust = 1),
         panel.spacing.x = unit(4, "pt"), 
         panel.spacing.y = unit(0.5, "pt"), 
         panel.background = element_rect(fill = "gray60", color = "white")) +
   scale_y_continuous(breaks = 0.5) +
   scale_x_continuous(breaks = seq(0, 80, 10), expand = c(0, 0))+
-  xlab("position (Mb)") + ylab("ancestry assignment")
+  xlab("Position (Mb)") + ylab("Ancestry assignment")
 ```
 
 
 ```{r}
-plot_grid(lai_amd_plot, avg_plot, nrow = 2, rel_heights = c(4,1), align = "v")
-lai_list <- gglist(list(lai_amd_plot, avg_plot))
-plot_list(gglist = lai_list, 
-          ncol = 1, heights = c(4,1),
+plot_list(gglist = list(lai_amd_plot, avg_plot), 
+          ncol = 1, heights = c(3,1),
           labels = c("A", "B"))
-plot_list(gglist = lai_list)
-
-lai_amd_plot / avg_plot
-
-ggarrange 
 ```
 
 ## Admixture length
@@ -691,53 +842,550 @@ all_blocks %>%
   pivot_longer(cols = OB:ER, names_to = "ancestry", values_to = "proportion") %>% 
   mutate(individual = factor(individual, levels = ind_order),
          length = end - start + 1) %>% 
-  filter(proportion != 0) %>% 
+  filter(proportion != 0, !ancestry %in% c("C", "OB")) %>% 
   ggplot() +
-  geom_density(aes(x = length, color = ancestry), size = 1.5) +
+  geom_density(aes(x = length/10^6, color = ancestry), linewidth = 1.5) +
   scale_color_manual(values = group_col[-3]) +
   theme_minimal() + 
   theme(panel.grid.minor = element_blank(), 
+        axis.title = element_text(size = 16),
         # panel.grid.major.y = element_blank(),
         strip.background = element_rect(fill = "#dadde6", color = "#dadde6"),
         strip.placement = "outside") +
-  # scale_x_continuous(breaks = seq(0, 80, 10)) +
-  xlab("admixture block length")
+  scale_x_continuous(breaks = seq(0, 80, 10)) +
+  xlab("Admixture block length (Mb)") + ylab("Density")
 ```
+
+
 
 ## recombination rate
 
 ```{r}
 marey_chr_data <- "./snps_data/Coffea_canephora_Crouzillat2020.txt"
-recom <- read.table(marey_chr_data, header = T)
-recom$map <- sapply(recom$map, function(i) 
+genmap <- read.table(marey_chr_data, header = T)
+genmap$map <- sapply(genmap$map, function(i) 
   paste0("Chr ", sprintf("%02d", which(LETTERS == i))), 
   USE.NAMES = F)
 ```
 
 ```{r}
-ggplot(recom) + 
+genmap_plot <- ggplot(genmap) + 
   geom_point(aes(x = phys/1e6, y = gen), size = 0.5) +
   facet_grid(cols = vars(map), scale = "free", space = "free", switch = "x") +
   theme_minimal() + 
   theme(panel.grid.minor = element_blank(), 
+        axis.ticks = element_line(),
+        axis.title.x = element_text(size = 14),
+        axis.title.y = element_text(size = 14),
         # panel.grid.major.y = element_blank(),
-        strip.background = element_rect(fill = "#dadde6", color = "#dadde6"),
+        strip.background.x = element_rect(fill = "#dadde6", color = "#dadde6"),
+        strip.background.y = element_rect(fill = NA, color = NA),
+        strip.text.x = element_text(size = 14),
         strip.placement = "outside") +
   scale_x_continuous(breaks = seq(0, 80, 10)) +
-  xlab("Physical distance (Mb)") +
+  xlab("Position (Mb)") +
   ylab("Genetic distance (cM)")
+
+plot_list(gglist = list(avg_plot, genmap_plot),
+          ncol = 1, heights = c(0.5, 0.5),
+          labels = c("A", "B"))
 ```
 
 ```{r}
-recom <- recom %>% 
+genmap <- genmap %>% 
   mutate(rate = gen/phys*1e6) 
-mean(recom$rate)
-nrow(recom)
+mean(genmap$rate)
+nrow(genmap)
 ```
 
 ```{r}
 marey_chr_data <- list.files("./snps_data", pattern = "chromosome", full.names = T)
-rec_rate <- do.call(rbind, lapply(marey_chr_data, function(f) read.table(f, header = T)))
+rec_rate <- do.call(rbind, lapply(marey_chr_data, function(f) {
+  df <- read.table(f, header = T)
+  chr <- sprintf("%02d", which(gsub(".+chromosome|\\.txt", "", basename(f)) == LETTERS))
+  df <- df %>% 
+    mutate(chromosome = paste("Chr", chr))
+  return(df)
+  }))
 mean(rec_rate$rec.rate, na.rm = T)
+```
+
+```{r}
+ggplot(rec_rate) + 
+  geom_line(aes(x = phys, y = rec.rate), size = 0.5) +
+  facet_grid(cols = vars(chromosome), scale = "free", space = "free", switch = "x") +
+  theme_minimal() + 
+  theme(panel.grid.minor = element_blank(), 
+        axis.ticks = element_line(),
+        axis.title.x = element_text(size = 12),
+        axis.title.y.left = element_text(size = 12),
+        axis.title.y.right = element_text(size = 12, color = "gray50"),
+        # panel.grid.major.y = element_blank(),
+        strip.background.x = element_rect(fill = "#dadde6", color = "#dadde6"),
+        strip.background.y = element_rect(fill = NA, color = NA),
+        strip.text.y = element_text(angle = 0, h = 0),
+        strip.placement = "outside") +
+  scale_x_continuous(breaks = seq(0, 80, 10)) +
+  xlab("Position (Mb)") +
+  ylab("Recombination rate (cM/Mb)")
+```
+
+recom rate + lai
+```{r}
+avg_local_long <- avg_local %>% 
+  mutate(position = position/1e6,
+         set = "") %>% 
+  pivot_longer(cols = OB:ER, names_to = "ancestry", values_to = "proportion") 
+
+genmap_lai_plot <- ggplot(avg_local_long) + 
+  facet_grid(cols = vars(chromosome), scale = "free", space = "free", switch = "x") +
+  # facet_wrap(vars(chromosome), nrow = 1, scale = "free_x", strip.position = "bottom") +
+  geom_point(data = recom %>% rename(chromosome = map) %>% 
+               mutate(set = ""), 
+             aes(x = phys/1e6, y = gen/250), 
+             size = 0.8, color = "gray65") +
+  geom_line(aes(x = position, y = proportion, color = ancestry), 
+            size = 0.8, show.legend = F) +
+  scale_y_continuous(name = "Average ancestry proportion",
+                     sec.axis = sec_axis(trans = ~.*250, name = "Genetic distance (cM)")) +
+  scale_color_manual(values = group_col) +
+  theme_minimal() + 
+  theme(panel.grid.minor = element_blank(), 
+        axis.ticks = element_line(),
+        axis.title.x = element_text(size = 12),
+        axis.title.y.left = element_text(size = 12),
+        axis.title.y.right = element_text(size = 12, color = "gray50"),
+        # panel.grid.major.y = element_blank(),
+        strip.background.x = element_rect(fill = "#dadde6", color = "#dadde6"),
+        strip.background.y = element_rect(fill = NA, color = NA),
+        strip.text.y = element_text(angle = 0, h = 0),
+        strip.placement = "outside") +
+  scale_x_continuous(breaks = seq(0, 80, 10)) +
+  xlab("Position (Mb)") 
+
+tiff(file.path(plot_dir, "lai_recom.tiff"),
+     width = 15, heigh = 10, unit = "in", res = 1000)
+plot_list(gglist = list(lai_amd_plot, genmap_lai_plot), 
+          ncol = 1, heights = c(4,1.5),
+          labels = c("A", "B"))
+dev.off()
+```
+
+## adaptive introgression (Fst)
+### Fst
+Estimate Fst by windows of 5kb between VN hybrids and the donor group AG (7 inds), D (9 inds), ER (12 inds) (threshold 0.7)
+
+```{r}
+## all hybrids together
+vn_hybrids <- data.frame(Label = rownames(global[!rownames(global) %in% inds_ER,]),
+                         assign = "hybrid") %>% 
+  mutate(Label = paste0(Label, ifelse(grepl("TR\\d", Label), "m", "")))
+write.table(vn_hybrids, "./snp_stats/vn_hybrids.txt", sep = "\t", 
+            row.names = F, col.names = F, quote = F)
+
+## only hybrids with AG admixture (include 4 three-way admixed inds)
+vn_AG <- data.frame(Label = rownames(global[rownames(global) %in% c(inds_AG),]),
+                         assign = "hybrid_AG") %>% 
+  mutate(Label = paste0(Label, ifelse(grepl("TR\\d", Label), "m", "")))
+write.table(vn_AG, "./snp_stats/vn_hybrids_AG.txt", sep = "\t", 
+            row.names = F, col.names = F, quote = F)
+
+## only hybrids with D admixture (include 4 three-way admixed inds except for S-122)
+vn_D <- data.frame(Label = rownames(global[rownames(global) %in% c(inds_D),]),
+                         assign = "hybrid_D") %>% 
+  mutate(Label = paste0(Label, ifelse(grepl("TR\\d", Label), "m", "")))
+write.table(vn_D, "./snp_stats/vn_hybrids_D.txt", sep = "\t", 
+            row.names = F, col.names = F, quote = F)
+
+## ancestral groups (AG, D, ER)
+ref_inds <- read.csv("./snp_stats/af_samples_ancestry.csv")
+af_donor <- ref_inds %>% 
+  dplyr::filter(assign %in% c("D", "AG", "ER")) %>% 
+  dplyr::select(Label, assign) 
+for (i in unique(af_donor$assign)) {
+  write.table(fst_pop %>% dplyr::filter(assign == i), 
+              paste0("./snp_stats/donor_", i, ".txt"), 
+              sep = "\t", 
+              row.names = F, col.names = F, quote = F)
+}
+
+write.table(fst_pop, "./snp_stats/snmf_thin_pop.txt", sep = "\t", 
+            row.names = F, col.names = F, quote = F)
+```
+
+```{bash}
+sbatch /shared/ifbstor1/projects/elai_most/diversity_wasi/seq_analysis/snp_stats/snp_stats.sh
+```
+
+```{r}
+all_windows_large <- all_chr[width(all_chr) > 1e6,]
+all_blocks <- mcols(all_windows_large) %>% 
+  as.data.frame() %>% 
+  mutate(chromosome = unlist(mapply(rep, 
+                                    all_windows_large@seqnames@values, 
+                                    all_windows_large@seqnames@lengths)),
+         start = start(all_windows_large),
+         end = end(all_windows_large)) %>% 
+  relocate(chromosome, start, end, individual)
+```
+
+```{r}
+hybrid_AG <- read.delim("./snp_stats/hybrid_AG.windowed.weir.fst")
+
+hybrid_AG %>% 
+  mutate(position = BIN_START/1e6,
+         set = "") %>% 
+  ggplot(.) + 
+  facet_grid(cols = vars(CHROM), rows = vars(set), scale = "free", space = "free", switch = "x") + 
+  geom_line(aes(x = position, y = MEAN_FST), color = group_col["AG"], show.legend = F) +
+  theme_minimal() + 
+  theme(panel.grid.minor = element_blank(), 
+        axis.ticks = element_line(),
+        # panel.grid.major.y = element_blank(),
+        strip.background.x = element_rect(fill = "#dadde6", color = "#dadde6"),
+        strip.background.y = element_rect(fill = NA, color = NA),
+        strip.text.y = element_text(angle = 0, h = 0),
+        strip.placement = "outside") +
+  scale_x_continuous(breaks = seq(0, 80, 10)) +
+  scale_y_continuous(limits = c(0, 0.5), breaks = seq(0, .50, .10)) +
+  xlab("Position (Mb)") + ylab("Fst between hybrids and group AG")
+```
+
+```{r}
+hybrid_D <- read.delim("./snp_stats/hybrid_D.windowed.weir.fst")
+
+hybrid_D %>% 
+  mutate(position = BIN_START/1e6,
+         set = "") %>% 
+  ggplot(.) + 
+  facet_grid(cols = vars(CHROM), rows = vars(set), scale = "free", space = "free", switch = "x") + 
+  geom_line(aes(x = position, y = MEAN_FST), color = group_col["D"], show.legend = F) +
+  theme_minimal() + 
+  theme(panel.grid.minor = element_blank(), 
+        axis.ticks = element_line(),
+        # panel.grid.major.y = element_blank(),
+        strip.background.x = element_rect(fill = "#dadde6", color = "#dadde6"),
+        strip.background.y = element_rect(fill = NA, color = NA),
+        strip.text.y = element_text(angle = 0, h = 0),
+        strip.placement = "outside") +
+  scale_x_continuous(breaks = seq(0, 80, 10)) +
+  scale_y_continuous(limits = c(0, 0.5), breaks = seq(0, .50, .10)) +
+  xlab("Position (Mb)") + ylab("Fst between hybrids and group D")
+```
+
+```{r}
+hybrid_ER <- read.delim("./snp_stats/hybrid_D.windowed.weir.fst")
+
+do.call(rbind, list(hybrid_ER %>% mutate(group = "ER"), 
+                 hybrid_AG %>% mutate(group = "AG"), 
+                 hybrid_D %>% mutate(group = "D"))) %>% 
+  as.data.frame() %>% 
+# hybrid_D %>% 
+  mutate(position = BIN_START/1e6) %>% 
+  ggplot(.) + 
+  facet_grid(cols = vars(CHROM), rows = vars(group), scale = "free", space = "free", switch = "both") + 
+  geom_line(aes(x = position, y = MEAN_FST, color = group), show.legend = F) +
+  scale_color_manual(values = group_col[c("AG", "D", "ER")]) +
+  theme_minimal() + 
+  theme(panel.grid.minor = element_blank(), 
+        axis.ticks = element_line(),
+        # panel.grid.major.y = element_blank(),
+        strip.background.x = element_rect(fill = "#dadde6", color = "#dadde6"),
+        strip.background.y = element_rect(fill = NA, color = NA),
+        strip.text.y = element_text(angle = 0, h = 0.5, size = 12),
+        strip.placement = "outside") +
+  scale_x_continuous(breaks = seq(0, 80, 10)) +
+  scale_y_continuous(limits = c(0, 0.5), breaks = seq(0, .50, .10)) +
+  xlab("Position (Mb)") + ylab("Fst between hybrids and ancestral groups")
+```
+
+
+
+```{r}
+hybridAG_donorAG <- read.delim("./snp_stats/hybridAG_donorAG.windowed.weir.fst")
+hybridAG_donorER <- read.delim("./snp_stats/hybridAG_donorER.windowed.weir.fst")
+donorAG_donorER <- read.delim("./snp_stats/donorAG_donorER.windowed.weir.fst")
+
+hybridAG_fst <- rbind(hybridAG_donorER %>% mutate(group = "ER"),
+                      hybridAG_donorAG %>% mutate(group = "AG"))
+
+hybridAG_plot <- all_blocks %>% 
+  filter(individual %in% c(inds_AG)) %>% 
+  pivot_longer(cols = OB:ER, names_to = "ancestry", values_to = "proportion") %>% 
+  mutate(start = start/1e6,
+         end = end/1e6,
+         individual = factor(individual, 
+                             levels = ind_order)) %>% 
+  group_by(chromosome, start, end, individual) %>% 
+  mutate(proportion_min = cum_min(proportion),
+         proportion_max = cum_max(proportion)) %>% 
+  ggplot() + 
+  facet_grid(rows = vars(individual), cols = vars(chromosome),
+             scale = "free_x", space = "free_x", switch = "x", shrink = F) + 
+  geom_rect(aes(xmin = start, xmax = end,
+                ymin = proportion_min, ymax = proportion_max,
+                fill = ancestry)) +
+  scale_fill_manual(values = group_col, na.value = "gray") +
+  theme_minimal() + 
+  theme(panel.grid = element_blank(), 
+        axis.ticks = element_line(),
+        axis.text.y = element_blank(),
+        strip.background.x = element_rect(fill = "#dadde6", color = "#dadde6"),
+        strip.background.y = element_rect(fill = NA, color = NA),
+        # strip.background.y = element_rect(fill = "#dadde6", color = "#dadde6"),
+        strip.placement = "outside",
+        strip.text.y = element_text(angle = 0, h = 0, size = 11),
+        panel.spacing.x = unit(4, "pt"), 
+        panel.spacing.y = unit(0.5, "pt"), 
+        panel.background = element_rect(fill = "gray60", color = "white")) +
+  scale_y_continuous(breaks = 0.5) +
+  scale_x_continuous(breaks = seq(0, 80, 10), expand = c(0, 0))+
+  xlab("Position (Mb)") + ylab("Ancestry assignment")
+
+hybridAG_fst_plot <- hybridAG_fst %>%
+  mutate(group = factor(group, levels = c("ER", "AG"))) %>% 
+  mutate(position = BIN_START/1e6) %>% 
+  ggplot(.) + 
+  facet_grid(cols = vars(CHROM), scale = "free", space = "free", switch = "x") + 
+  geom_line(aes(x = position, y = MEAN_FST, color = group)) +
+  scale_color_manual(values = group_col[c("AG", "ER")]) +
+  theme_minimal() + 
+  theme(panel.grid.minor = element_blank(), 
+        axis.ticks = element_line(),
+        # panel.grid.major.y = element_blank(),
+        strip.background.x = element_rect(fill = "#dadde6", color = "#dadde6"),
+        strip.background.y = element_rect(fill = NA, color = NA),
+        strip.text.y = element_text(angle = 0, h = 0.5, size = 12),
+        strip.placement = "outside") +
+  scale_x_continuous(breaks = seq(0, 80, 10)) +
+  scale_y_continuous(limits = c(0, 0.5), breaks = seq(0, .50, .10)) +
+  xlab("Position (Mb)") + ylab("Fst. AG admixed vs ancestral")
+
+donorAG_donorER %>%
+  mutate(position = BIN_START/1e6) %>% 
+  ggplot(.) + 
+  facet_grid(cols = vars(CHROM), scale = "free", space = "free", switch = "x") + 
+  geom_line(aes(x = position, y = MEAN_FST), color = "gray") +
+  theme_minimal() + 
+  theme(panel.grid.minor = element_blank(), 
+        axis.ticks = element_line(),
+        # panel.grid.major.y = element_blank(),
+        strip.background.x = element_rect(fill = "#dadde6", color = "#dadde6"),
+        strip.background.y = element_rect(fill = NA, color = NA),
+        strip.text.y = element_text(angle = 0, h = 0.5, size = 12),
+        strip.placement = "outside") +
+  scale_x_continuous(breaks = seq(0, 80, 10)) +
+  scale_y_continuous(limits = c(0, 0.5), breaks = seq(0, .50, .10)) +
+  xlab("Position (Mb)") + ylab("Fst. AG vs ER")
+
+plot_list(gglist = list(hybridAG_plot, hybridAG_fst_plot), 
+          ncol = 1, heights = c(.6,1),
+          labels = c("A", "B"))
+```
+
+```{r}
+hybridD_donorD <- read.delim("./snp_stats/hybridD_donorD.windowed.weir.fst")
+hybridD_donorER <- read.delim("./snp_stats/hybridD_donorER.windowed.weir.fst")
+donorD_donorER <- read.delim("./snp_stats/donorD_donorER.windowed.weir.fst")
+
+hybridD_fst <- rbind(hybridD_donorD %>% mutate(group = "D"),
+                      hybridD_donorER %>% mutate(group = "ER"))
+
+hybridD_plot <- all_blocks %>% 
+  filter(individual %in% c(inds_D)) %>% 
+  pivot_longer(cols = OB:ER, names_to = "ancestry", values_to = "proportion") %>% 
+  mutate(start = start/1e6,
+         end = end/1e6,
+         individual = factor(individual, 
+                             levels = ind_order)) %>% 
+  group_by(chromosome, start, end, individual) %>% 
+  mutate(proportion_min = cum_min(proportion),
+         proportion_max = cum_max(proportion)) %>% 
+  ggplot() + 
+  facet_grid(rows = vars(individual), cols = vars(chromosome),
+             scale = "free_x", space = "free_x", switch = "x", shrink = F) + 
+  geom_rect(aes(xmin = start, xmax = end,
+                ymin = proportion_min, ymax = proportion_max,
+                fill = ancestry)) +
+  scale_fill_manual(values = group_col, na.value = "gray") +
+  theme_minimal() + 
+  theme(panel.grid = element_blank(), 
+        axis.ticks = element_line(),
+        axis.text.y = element_blank(),
+        strip.background.x = element_rect(fill = "#dadde6", color = "#dadde6"),
+        strip.background.y = element_rect(fill = NA, color = NA),
+        # strip.background.y = element_rect(fill = "#dadde6", color = "#dadde6"),
+        strip.placement = "outside",
+        strip.text.y = element_text(angle = 0, h = 0, size = 11),
+        panel.spacing.x = unit(4, "pt"), 
+        panel.spacing.y = unit(0.5, "pt"), 
+        panel.background = element_rect(fill = "gray60", color = "white")) +
+  scale_y_continuous(breaks = 0.5) +
+  scale_x_continuous(breaks = seq(0, 80, 10), expand = c(0, 0))+
+  xlab("Position (Mb)") + ylab("Ancestry assignment")
+
+hybridD_fst_plot <- hybridD_fst %>%
+  mutate(position = BIN_START/1e6) %>% 
+  ggplot(.) + 
+  facet_grid(cols = vars(CHROM), scale = "free", space = "free", switch = "x") + 
+  geom_line(aes(x = position, y = MEAN_FST, color = group)) +
+  scale_color_manual(values = group_col[c("D", "ER")]) +
+  theme_minimal() + 
+  theme(panel.grid.minor = element_blank(), 
+        axis.ticks = element_line(),
+        # panel.grid.major.y = element_blank(),
+        strip.background.x = element_rect(fill = "#dadde6", color = "#dadde6"),
+        strip.background.y = element_rect(fill = NA, color = NA),
+        strip.text.y = element_text(angle = 0, h = 0.5, size = 12),
+        strip.placement = "outside") +
+  scale_x_continuous(breaks = seq(0, 80, 10)) +
+  scale_y_continuous(limits = c(0, 0.5), breaks = seq(0, .50, .10)) +
+  xlab("Position (Mb)") + ylab("Fst. D admixed vs ancestral")
+
+donorD_donorER %>%
+  mutate(position = BIN_START/1e6) %>% 
+  ggplot(.) + 
+  facet_grid(cols = vars(CHROM), scale = "free", space = "free", switch = "x") + 
+  geom_line(aes(x = position, y = MEAN_FST), color = "gray") +
+  scale_color_manual(values = group_col[c("D", "ER")]) +
+  theme_minimal() + 
+  theme(panel.grid.minor = element_blank(), 
+        axis.ticks = element_line(),
+        # panel.grid.major.y = element_blank(),
+        strip.background.x = element_rect(fill = "#dadde6", color = "#dadde6"),
+        strip.background.y = element_rect(fill = NA, color = NA),
+        strip.text.y = element_text(angle = 0, h = 0.5, size = 12),
+        strip.placement = "outside") +
+  scale_x_continuous(breaks = seq(0, 80, 10)) +
+  scale_y_continuous(limits = c(0, 0.5), breaks = seq(0, .50, .10)) +
+  xlab("Position (Mb)") + ylab("Fst. D vs ER")
+
+plot_list(gglist = list(hybridD_plot, hybridD_fst_plot), 
+          ncol = 1, heights = c(1,1),
+          labels = c("A", "B"))
+```
+
+
+### distribution of ancestry proportion
+
+```{r}
+avg_local %>% 
+  pivot_longer(., cols = OB:ER, names_to = "group", values_to = "proportion") %>% 
+  filter(!group %in% c("C", "OB")) %>% 
+  ggplot() +
+  facet_grid(rows = vars(group), scales = "fixed", space = "fixed") +
+  geom_histogram(aes(x = proportion, fill = group), binwidth = .01, show.legend = F) +
+  # geom_density(aes(x = proportion, color = group)) +
+  scale_color_manual(values = group_col) +
+  scale_fill_manual(values = group_col) +
+  theme_minimal() + 
+  theme(panel.border = element_rect(color = "gray", fill = NA),
+        strip.text = element_text(size = 16),
+        axis.title = element_text(size = 16)) +
+  scale_y_continuous(expand = c(0,0)) +
+  ylab("Number of SNPs") +
+  xlab("Average ancestry proportion at a SNP")
+```
+
+```{r}
+window_lai <- avg_local %>% 
+  pivot_longer(., cols = OB:ER, names_to = "group", values_to = "proportion") %>% 
+  group_by(chromosome, group) %>% 
+  mutate(window = cut(position, breaks = seq(0, 70*10^6, 50000))) %>% 
+  mutate(window = as.numeric(gsub("\\(.+\\,|]", "", as.character(window)))/10^6) %>% 
+  group_by(chromosome, group, window) %>% 
+  summarise(mean_prop = mean(proportion))
+
+
+left_join(window_lai, rec_rate %>% rename(window = phys), 
+          by = c("chromosome", "window")) %>% 
+  filter(!group %in%  c("C", "OB")) %>% 
+  ggplot() +
+  facet_grid(rows = vars(group)) +
+  geom_point(aes(x = rec.rate, y = mean_prop, color = group), show.legend = F) +
+  scale_color_manual(values = group_col) +
+  scale_fill_manual(values = group_col) +
+  theme_minimal() + 
+  theme(panel.border = element_rect(color = "gray", fill = NA),
+        strip.text = element_text(size = 16)) +
+  xlab("Mean recombination rate in 50 kb windows") + 
+  ylab("Mean ancestry proportion in 50 kb windows")
+
+```
+
+
+## for asic poster
+lai plots of 3 individuals
+
+```{r}
+pp3 <- getDefaultPlotParams(plot.type=6)
+pp3$topmargin <- 5
+pp3$bottommargin <- 5
+pp3$data1outmargin <- 20
+
+chr_ind <- all_chr[all_chr$individual == "TR15"]
+all_windows_large <- chr_ind[width(chr_ind) > 1e6,]
+all_windows_small <- chr_ind[width(chr_ind) < 1e6,]
+groups <- colnames(mcols(all_chr))[colnames(mcols(all_chr)) != "individual"]
+gkp <- plotKaryotype(genome = genome_GR, plot.type = 6,
+                     plot.params = pp3) 
+kpDataBackground(gkp, data.panel ="ideogram", color = "grey70")
+# kpAddBaseNumbers(gkp, tick.dist = 1e7)
+for (g in 1:length(groups)) {
+  if (g == 1) {
+    ga <- 0
+    gz <- mcols(all_windows_large)[,groups[g]]
+  } else {
+    ga <- gz
+    gz <- gz+mcols(all_windows_large)[,groups[g]]
+  }
+  kpBars(gkp, data = all_windows_large, y0 = ga, y1 = gz, col = group_col[groups[g]], border = NA)
+}
+# kpAxis(gkp, side = 2, data.panel=1, cex = 0.7)
+```
+
+
+```{r}
+chr_ind <- all_chr[all_chr$individual == "S-75"]
+all_windows_large <- chr_ind[width(chr_ind) > 1e6,]
+all_windows_small <- chr_ind[width(chr_ind) < 1e6,]
+groups <- colnames(mcols(all_chr))[colnames(mcols(all_chr)) != "individual"]
+gkp <- plotKaryotype(genome = genome_GR, plot.type = 6,
+                     plot.params = pp3) 
+kpDataBackground(gkp, data.panel ="ideogram", color = "grey70")
+# kpAddBaseNumbers(gkp, tick.dist = 1e7)
+for (g in 1:length(groups)) {
+  if (g == 1) {
+    ga <- 0
+    gz <- mcols(all_windows_large)[,groups[g]]
+  } else {
+    ga <- gz
+    gz <- gz+mcols(all_windows_large)[,groups[g]]
+  }
+  kpBars(gkp, data = all_windows_large, y0 = ga, y1 = gz, col = group_col[groups[g]], border = NA)
+}
+# kpAxis(gkp, side = 2, data.panel=1, cex = 0.7)
+```
+
+```{r}
+chr_ind <- all_chr[all_chr$individual == "S-122"]
+all_windows_large <- chr_ind[width(chr_ind) > 1e6,]
+all_windows_small <- chr_ind[width(chr_ind) < 1e6,]
+groups <- colnames(mcols(all_chr))[colnames(mcols(all_chr)) != "individual"]
+gkp <- plotKaryotype(genome = genome_GR, plot.type = 6,
+                     plot.params = pp3) 
+kpDataBackground(gkp, data.panel ="ideogram", color = "grey70")
+# kpAddBaseNumbers(gkp, tick.dist = 1e7)
+for (g in 1:length(groups)) {
+  if (g == 1) {
+    ga <- 0
+    gz <- mcols(all_windows_large)[,groups[g]]
+  } else {
+    ga <- gz
+    gz <- gz+mcols(all_windows_large)[,groups[g]]
+  }
+  kpBars(gkp, data = all_windows_large, y0 = ga, y1 = gz, col = group_col[groups[g]], border = NA)
+}
+# kpAxis(gkp, side = 2, data.panel=1, cex = 0.7)
 ```
 

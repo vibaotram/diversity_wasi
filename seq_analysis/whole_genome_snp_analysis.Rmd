@@ -224,6 +224,8 @@ Parameters as interpreted:
 import vcf file in R
 ```{r}
 vcf_thin <- "./snps_data/all_final_thin5000_maf002.recode.vcf"
+vcf_thin <- "/shared/projects/afrob_seq/wgs_snp/vcf_bgi_2021/gbp_output/filtered_vcf_by_chrom/af_final_maf005_thin5k_60inds.recode.vcf"
+vcf_thin <- "/shared/projects/afrob_seq/wgs_snp/vcf_bgi_2021/gbp_output/filtered_vcf_by_chrom/all_final_thin5000_maf005.recode.vcf"
 snp_thin <- read.vcfR(vcf_thin)
 snp_thin@fix[,1] <- gsub("\\.", "_", snp_thin@fix[,1])
 ```
@@ -256,6 +258,7 @@ df_thin_md <- apply(df_thin, c(1,2), function(i) {
 
 ```{r}
 
+snmf_dir <- "./snmf_60inds"
 snmf_dir <- "./snmf"
 dir.create(snmf_dir)
 all_geno_file <- file.path(snmf_dir, "thin_all.geno")
@@ -267,7 +270,7 @@ write.geno(ref_thin_md, ref_geno_file)
 
 snmf for the reference set only, with best K = 5
 ```{r}
-ref_snmf <- snmf(ref_geno_file, K = 1:10, repetitions = 10, CPU = 20, 
+ref_snmf <- snmf(ref_geno_file, K = 1:10, repetitions = 10, CPU = 2, 
                  entropy = T, project = "new", seed = 11)
 plot(ref_snmf)
 ```
@@ -275,7 +278,8 @@ plot(ref_snmf)
 ```{r}
 best_k <- which.min(lapply(1:10, function(i) min(cross.entropy(ref_snmf, K = i))))
 best_run <- which.min(cross.entropy(ref_snmf, K = best_k))
-ind_ord <- barchart(ref_snmf, K = best_k, run = best_run, plot = F)
+ind_ord <- LEA::barchart(ref_snmf, K = best_k, run = best_run, plot = F)
+# ind_ord <- barchart(ref_snmf, K = best_k, run = best_run, plot = F)
 ref_prop <- Q(ref_snmf, K = best_k, run = best_run)
 ref_prop <- ref_prop %>% 
   as.data.frame() %>% 
@@ -283,6 +287,7 @@ ref_prop <- ref_prop %>%
                       levels = rownames(ref_thin_md)[ind_ord$order])) %>% 
   pivot_longer(cols = -ind, names_to = "ancestry", values_to = "proportion")
 ref_prop$ancestry <- as.factor(ref_prop$ancestry)
+# levels(ref_prop$ancestry) <- c("ER", "OB", "AG", "D", "C")
 levels(ref_prop$ancestry) <- c("D", "C", "AG", "OB", "ER")
 ref_prop$ancestry <- factor(ref_prop$ancestry, levels = c("ER", "OB", "C", "AG", "D"))
 turbo_col <- c("#30123BFF", "#28BBECFF", "#A2FC3CFF", "#FB8022FF", "#7A0403FF")
@@ -296,8 +301,10 @@ ggplot(ref_prop) +
 
 snmf for the whole set, with K = 5
 ```{r}
+# all_snmf <- snmf(all_geno_file, K = 1:10, repetitions = 10, CPU = 1, 
 all_snmf <- snmf(all_geno_file, K = 1:10, repetitions = 10, CPU = 20, 
                  entropy = T, project = "new", seed = 11)
+all_snmf <- load.snmfProject("./snmf/thin_all.snmfProject")
 plot(all_snmf)
 ```
 

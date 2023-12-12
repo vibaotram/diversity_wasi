@@ -26,12 +26,13 @@ library(ggtree)
 library(grid)
 library(factoextra)
 library(FactoMineR)
+library(vcfR)
 ```
 
 ## Data
 
 ```{r get_data, include=FALSE}
-con <- dbConnect(RSQLite::SQLite(), dbname = "./genotyping/seq_kasp_array_genotypes_261SNPs.db")
+con <- dbConnect(RSQLite::SQLite(), dbname = "./seq_kasp_array_genotypes_261SNPs.db")
 
 geno <- dbReadTable(con, "genotype")
 info <- dbReadTable(con, "info")
@@ -60,6 +61,44 @@ all_geno <- all_geno[sort(rownames(all_geno)),]
 ```
 
 
+```{r}
+## additional genotypes (M1-M4)
+m_vcf <- "./raw_data/inds_M1234_snp261.recode.vcf"
+m_vcfR <- read.vcfR(m_vcf, verbose = F)# reference (sequencing)
+### substitute "." in CHROM column to be able to convert vcfR to genind
+m_vcfR@fix[,1] <- gsub("\\.", "_", m_vcfR@fix[,1])
+m_genind <- vcfR2genind(m_vcfR, return.alleles = T)
+
+genind2geno <- function(genind, ref_allele = NULL, NA.code = 9) {
+  stopifnot(class(genind) == "genind")
+  raw_geno <- genind2df(genind, usepop = F)
+  if (is.null(ref_allele)) {
+    ref_allele <- apply(raw_geno, 2, function(i) na.omit(unique(unlist(strsplit(i, ""))))[1])
+  }
+  stopifnot(nLoc(genind) == length(ref_allele))
+  geno <- raw_geno
+  for(c in 1:ncol(geno)) {
+    ref <- ref_allele[c]
+    geno[,c] <- sapply(raw_geno[,c], function(g) {
+      if (is.na(g) || g == "NA") {
+        n <- NA.code
+      } else {
+        n <- length(grep(ref, unlist(strsplit(g, "")), invert = T))
+      }
+      return(n)
+    }, USE.NAMES = F)
+  }
+  return(geno)
+}
+
+snp_info <- dbReadTable(con, "snp_info")
+
+m_geno <- genind2geno(m_genind, 
+            snp_info$REF[snp_info$ID %in% names(m_genind@all.names)], 
+            NA.code = NA)
+
+all_geno <- bind_rows(all_geno, m_geno)
+```
 
 
 
@@ -89,6 +128,8 @@ group9_col <- group9_col[c("D", "C", "G", "A", "B", "O", "R", "E", "Vietnam")]
 group6_col <- group9_col
 group6_col["R"] <- group6_col["E"]
 group6_col["B"] <- group6_col["O"]
+group5_col <- group6_col
+group5_col["G"] <- group5_col["A"]
 group9_size <- c(rep(6, 8), 4)
 names(group9_size) <- names(group9_col)
 group9_size2 <- c(rep(3, 8), 5, 5)
@@ -116,6 +157,9 @@ all_pca_proj <- data.frame("code" = rownames(all_geno),
                            "PC3" = all_pca$projections[,3])
 all_pca_proj <- left_join(all_pca_proj, acc_info, by = "code")
 eigen <- all_pca$eigenvalues[,1]
+
+## assign group E for the M1-M4 inds
+all_pca_proj$group[is.na(all_pca_proj$group)] <- "E"
 
 all_pca_proj <- all_pca_proj %>% 
   # mutate(group = ifelse(is.na(group), "Vietnam", group)) %>%
@@ -154,6 +198,8 @@ all_pca_proj <- all_pca_proj %>%
   rownames_to_column("code") 
 
 all_pca_proj <- left_join(all_pca_proj, acc_info, by = "code")
+## assign group E for the M1-M4 inds
+all_pca_proj$group[is.na(all_pca_proj$group)] <- "E"
 
 all_pca_proj <- all_pca_proj %>% 
   mutate(group = ifelse(is.na(group), "Vietnam", group)) %>%
@@ -170,6 +216,7 @@ pca1 <- all_pca_proj %>%
   geom_point(aes(x = PC1, y = PC2, 
                  color = group, shape = group, size = group, alpha = group), 
              size = 5) +
+  geom_text(aes(x = PC1, y = PC2, label = code, color = group), nudge_y = 1) +
   # geom_text(aes(x = PC1, y = PC2, label = label, color = group)) +
   xlab(paste0("PC1 (", format(eigen[1]/sum(eigen)*100, digits = 2), "%)")) +
   ylab(paste0("PC2 (", format(eigen[2]/sum(eigen)*100, digits = 2), "%)")) +
@@ -214,7 +261,7 @@ all_dist <- poppr::bitwise.dist(all_gl, euclidean = T, missing_match = T, percen
 ```{r nj_tree}
 nj_tree <- ape::nj(all_dist)
 plot(nj_tree, "u")
-nj1 <- ggtree(nj_tree, ladderize = F, layout = "ape", color = "gray") %<+% acc_info +
+nj1 <- ggtree(nj_tree, ladderize = F, layout = "ape", color = "gray") %<+% (all_pca_proj %>% select(-label)) +
   # geom_tiplab(aes(subset = grepl("S-", label), color = group), hjust = -0.5,
   #             linesize = .2, size = 5) +
   geom_tippoint(aes(color = group, size = group, alpha = group, shape = group)) +
@@ -226,6 +273,15 @@ nj1 <- ggtree(nj_tree, ladderize = F, layout = "ape", color = "gray") %<+% acc_i
   # coord_flip() +
   scale_x_reverse() +
   scale_y_reverse() 
+
+ggtree(nj_tree, layout = "dendrogram", color = "gray") %<+% 
+  (all_pca_proj %>% 
+     mutate(labelm = if_else(grepl("M\\d$", code), code, pop)) %>% 
+     mutate(labelm = if_else(group %in% c("E", "R"), labelm, "")) %>% 
+     select(-label)) +
+  geom_tiplab(aes(label = labelm, color = group), 
+              hjust = 1, vjust = 0.5, angle = 90,
+              linesize = .2, size = 3, align = F)
 
 ggtree(hclust(all_dist), ladderize = F) %<+% acc_info +
   # geom_tiplab(aes(subset = grepl("S-", label), color = group), hjust = -0.5,
@@ -768,13 +824,17 @@ pca2 <- core6 %>%
   arrange(group) %>% 
   ggplot() +
   geom_point(aes(x = PC1, y = PC2, 
-                 fill = group, shape = group, alpha = group, color = group, size = group)) +
+                 fill = group, shape = group, color = group), alpha = 0.7, size = 3) +
+                 # fill = group, shape = group, alpha = group, color = group, size = group)) +
   # geom_text(aes(x = PC1, y = PC2, label = label, color = group)) +
   xlab(paste0("PC1 (", format(eigen[1]/sum(eigen)*100, digits = 2), "%)")) +
   ylab(paste0("PC2 (", format(eigen[2]/sum(eigen)*100, digits = 2), "%)")) +
   # scale_color_manual(values = c(as.character(group6_col), "gold3")) +
   scale_color_manual(values = c(rep("black", 9), "gold3")) +
   scale_fill_manual(values = c(as.character(group6_col), "gold3")) + 
+  scale_shape_manual(values = c(group9_shape2, c(group9_shape2, "Vietnam core set" = 21))) +
+  # scale_size_manual(values = c(rep(3, 9), 2)) +
+  # scale_alpha_manual(values = c(rep(0.7, 9), 1)) +
   scale_shape_manual(values = c(group9_shape2, c(group9_shape2, "Vietnam core set" = 8))) +
   scale_size_manual(values = c(rep(3, 9), 2)) +
   scale_alpha_manual(values = c(rep(1, 8), 0.7, 1)) +
@@ -817,7 +877,10 @@ eval_plots <- plot_grid(eval_core_6$plot[[5]],
                         eval_core_6$plot[[8]],
                         nrow = 1, labels = c("A", "B", "C"))
 tiff(filename = file.path(plotdir, "eval_core_6.tiff"),
-     width = 8, height = 9, units = "in", res = 1200)
+     width = 9, height = 10, units = "in", res = 1200)
+# pdf(file.path(plotdir, "eval_core_6.pdf"),
+#      width = 8, height = 9)
+     # width = 8, height = 9, units = "in", res = 1200)
 pdf(file.path(plotdir, "eval_core_6.pdf"),
      width = 8, height = 9)
 plot_grid(eval_plots, pca2, ncol = 1, labels = c("", "D"), rel_heights = c(0.6, 1))
@@ -856,7 +919,14 @@ dev.off()
 
 ```{r tree}
 cg_vn <- all_snmf_prop6 %>% 
-  filter(group %in% c("O", "B", "R", "E") | (group == "Vietnam" & new_ancestry == 8 & proportion > 0.8)) 
+  filter(group %in% c("O", "B", "R", "E") | (group == "Vietnam" & new_ancestry == 8 & proportion > 0.9)) 
+
+cg_vn <- all_snmf_prop6 %>% 
+  filter(k == 6, 
+         ancestry == "V3" & proportion > 0.9)
+
+cg_vn <- all_snmf_prop6 %>% 
+  filter(group %in% c("R", "E") | (group == "Vietnam" & new_ancestry == 8 & proportion > 0.95)) 
 
 cg_vn_genind <- all_genind[unique(cg_vn$code)]
 cg_vn_dist <- dist(cg_vn_genind, method = "euclidean")
@@ -873,7 +943,7 @@ ggtree(cg_vn_hclust, layout = "dendrogram") %<+% (acc_info %>% filter(code %in% 
   geom_tiplab(aes(label = pop), angle = 90, hjust = 1, size = 3) +
   guides(color = guide_legend(title = "group")) +
   scale_shape_manual(values = 0:8) +
-  scale_color_manual(values = group9_col)
+  scale_color_manual(values = group9_col[unique(cg_vn$group)])
 ```
 
 ```{r}
@@ -1038,8 +1108,8 @@ vn_pcoa_proj %>%
 
 ```{r}
 cg_inds <- all_snmf_prop %>% 
-  filter(ancestry == "V2",
-         proportion > 0.8)
+  filter(k == 6, 
+         ancestry == "V3" & proportion > 0.9)
 
 cg_geno <- all_geno[which(rownames(all_geno) %in% cg_inds$code),]
 dim(cg_geno)
@@ -1054,6 +1124,13 @@ ggtree(cg_tree, ladderize = T) +
 
 ggtree(cg_tree, ladderize = T, layout = "ape") +
   geom_tiplab()
+
+ggtree(cg_tree, ladderize = T, layout = "dendrogram")  %+>% (acc_info %>% filter(code %in% cg_inds$code)) +
+  geom_tippoint(aes(color = group), shape = 16, size = 3) +
+  # geom_tiplab(aes(label = pop), angle = 90, hjust = 1, size = 3) +
+  guides(color = guide_legend(title = "group")) +
+  scale_shape_manual(values = 0:8) +
+  scale_color_manual(values = group9_col)
 ```
 
 
@@ -1265,7 +1342,7 @@ afmap +
 
 ```{r african_map}
 afmap <- ggplot(data = africa) +
-  geom_sf(fill = "white", color = "grey40", size = 0.3) +
+  geom_sf(fill = "white", color = "black", size = 0.3) +
   coord_sf(xlim = c(-15, 35), ylim = c(-18, 13), expand = TRUE) +
   geom_point(data = group_coord,
             aes(x = x_mean, y = y_mean, fill = group, color = group, size = group),
@@ -1285,9 +1362,9 @@ afmap <- ggplot(data = africa) +
   theme(legend.box.margin = margin(l = 20), 
         legend.key.size = unit(14, "pt"),
         legend.key.height = unit(15, "pt")) +
-  scale_color_manual(values = group6_col) +
-  scale_fill_manual(values = group6_col) + 
-  scale_size_manual(values = c(25, 25, 25, 25, 50, 20, 20))
+  scale_color_manual(values = group5_col[-9]) +
+  scale_fill_manual(values = group5_col[-9]) + 
+  scale_size_manual(values = c(25, 25, 25, 25, 50, 30, 30, 20))
 ```
 
 
