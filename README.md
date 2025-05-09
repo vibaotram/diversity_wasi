@@ -1,11 +1,11 @@
 # diversity_wasi
-Scripts and some data for [paper]()
+Scripts and some data available for [paper]()
 
 ## genotyping
 - snp_panels: SNP data before and after filtering
 - lgc_results: raw data from LGC
-- raw_genotype: genotype data of all individuals (including the ones not on paper 2)
-
+- raw_genotype: genotype data of all individuals (including the ones not on the paper)
+- genetic_diveristy.R: all the genotyping analyses
 
 
 ## seq_analysis

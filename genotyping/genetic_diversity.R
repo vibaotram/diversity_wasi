@@ -67,6 +67,11 @@ dir.create(plotdir, showWarnings = F)
 poppr::missingno(all_genind)
 
 
+#############
+## run PCA ##
+#############
+all_pca <- PCA(all_geno)
+
 ## get PC1 and PC2
 all_pca_proj <- all_pca$ind$coord[,1:2]
 colnames(all_pca_proj) <- c("PC1", "PC2")
@@ -79,63 +84,59 @@ all_pca_proj <- left_join(all_pca_proj, acc_info, by = "code")
 all_pca_proj <- all_pca_proj %>% 
   mutate(group = ifelse(is.na(group), "Vietnam", group)) %>%
   mutate(label = ifelse(group == "Vietnam", as.character(code), group)) %>% 
-  mutate(group = factor(group, levels = names(group9_col)))
+  # mutate(group = factor(group, levels = names(group9_col))) %>% 
+  mutate(new_ancestry_name = names(group9_col[group])) %>% 
+  mutate(new_ancestry_name = case_when(new_ancestry_name %in% c("O", "B") ~ "OB",
+                                       new_ancestry_name %in% c("E", "R") ~ "ER",
+                                       TRUE ~ new_ancestry_name)) %>% 
+  mutate(new_ancestry_name = factor(new_ancestry_name, names(group6_col)))
 
 eigen <- all_pca$eig[,1]
-
-## custom point style for each group
-group9_col <- c(turbo(5), turbo(4, begin = 0.1, end = 0.9)[-3], "gray50")
-names(group9_col) <- c("E", "O", "C", "A", "D", "R", "B", "G", "Vietnam")
-group9_col <- group9_col[c("D", "C", "G", "A", "B", "O", "R", "E", "Vietnam")]
-group9_size <- c(rep(4, 8), 3)
-names(group9_size) <- names(group9_col)
-group9_alpha <- c(rep(1, 8), 0.8)
-names(group9_alpha) <- names(group9_col)
-group9_shape <- rep(16, 9)
-names(group9_shape) <- names(group9_col)
-group9_shape["R"] <- 17
-group9_shape["B"] <- 18
 
 
 ## plot PCA results
 # tiff(filename = file.path(plotdir, "pca_all.tiff"),
 #      width = 6, height = 5, units = "in", res = 1200)
-pca1 <- all_pca_proj %>% 
-  arrange(desc(group)) %>% 
+# pca1 <- all_pca_proj %>% 
+#   arrange(desc(group)) %>% 
+#   ggplot() +
+#   geom_point(aes(x = PC1, y = PC2, color = group, shape = group), size = 5) +
+#   # geom_text(aes(x = PC1, y = PC2, label = label, color = group)) +
+#   xlab(paste0("PC1 (", format(eigen[1]/sum(eigen)*100, digits = 2), "%)")) +
+#   ylab(paste0("PC2 (", format(eigen[2]/sum(eigen)*100, digits = 2), "%)")) +
+#   scale_color_manual(values = group9_col) + 
+#   scale_shape_manual(values = 0:8) +
+#   theme_minimal() + 
+#   theme(panel.border = element_rect(color = "gray", fill = NA),
+#         axis.title = element_text(size = 12))
+# pca1
+
+pca1 <- all_pca_proj %>%
+  arrange(desc(group)) %>%
   ggplot() +
-  geom_point(aes(x = PC1, y = PC2, color = group, shape = group, alpha = group, size = group)) +
+  geom_point(aes(x = PC1, y = PC2,
+                 fill = new_ancestry_name), shape = 21, color = "black", alpha = 0.7, size = 3) +
   # geom_text(aes(x = PC1, y = PC2, label = label, color = group)) +
   xlab(paste0("PC1 (", format(eigen[1]/sum(eigen)*100, digits = 2), "%)")) +
   ylab(paste0("PC2 (", format(eigen[2]/sum(eigen)*100, digits = 2), "%)")) +
-  scale_color_manual(values = group9_col) + 
-  scale_shape_manual(values = group9_shape) +
-  scale_alpha_manual(values = group9_alpha) + 
-  scale_size_manual(values = group9_size) +
-  theme_minimal() + 
+  # scale_color_manual(values = c(as.character(group6_col), "gold3")) +
+  # scale_color_manual(values = c(rep("black", 9), "gold3")) +
+  scale_fill_manual(values = group6_col) +
+  guides(fill = guide_legend(title = "group")) +
+  # scale_shape_manual(values = group6_shape) +
+  # scale_size_manual(values = c(rep(3, 9), 2)) +
+  # scale_alpha_manual(values = c(rep(1, 8), 0.7, 1)) +
+  theme_minimal() +
   theme(panel.border = element_rect(color = "gray", fill = NA),
         axis.title = element_text(size = 12))
+
+tiff(filename = file.path(plotdir, "pca_all.tiff"),
+     width = 8, height = 7, units = "in", res = 800)
 pca1
-# dev.off()
+dev.off()
 
-all_pca_proj %>% 
-  filter(PC1 < -3) %>% 
-  arrange(desc(group)) %>% 
-  ggplot() +
-  geom_point(aes(x = PC1, y = PC2, color = group, shape = group, alpha = group, size = group)) +
-  # geom_text(aes(x = PC1, y = PC2, label = label, color = group)) +
-  xlab(paste0("PC1 (", format(eigen[1]/sum(eigen)*100, digits = 2), "%)")) +
-  ylab(paste0("PC2 (", format(eigen[2]/sum(eigen)*100, digits = 2), "%)")) +
-  scale_color_manual(values = group9_col) + 
-  scale_shape_manual(values = group9_shape) +
-  scale_alpha_manual(values = group9_alpha) + 
-  scale_size_manual(values = group9_size) +
-  theme_minimal() + 
-  theme(panel.border = element_rect(color = "gray", fill = NA),
-        axis.title = element_text(size = 12))
 
-###################
-## NJ clustering ##
-###################
+
 
 ##############
 ## assign African populations ##
@@ -145,8 +146,8 @@ af_geno[is.na(af_geno)] <- 9
 af_geno_file <- file.path(pca_dir, "af.geno")
 write.geno(af_geno, af_geno_file)
 af_snmf <- snmf(input.file = af_geno_file, K = 1:10, 
-                 repetitions = 100, CPU = 20, 
-                 entropy = T, seed = 987654321, project = "new")
+                repetitions = 100, CPU = 20, 
+                entropy = T, seed = 987654321, project = "new")
 plot(all_snmf)
 
 af_prop_list <- sapply(5:8, function(k) {
@@ -204,7 +205,7 @@ dev.off()
 ## get results for K=5:8
 all_prop_list <- sapply(5:8, function(k) {
   prop_5 <- Q(all_snmf, K = k, run = which.min(cross.entropy(all_snmf, K = k))) %>% as.data.frame()
-  prop_5$code <- acc_info$code
+  prop_5$code <- rownames(all_geno)
   prop_5 <- left_join(prop_5, acc_info, by = "code")
   ind_order <- LEA::barchart(all_snmf, K = k, run = which.min(cross.entropy(all_snmf, K = k)), plot = F)
   # prop_5 <- prop_5[ind_order$order,]
@@ -236,9 +237,11 @@ ref_ord6 <- all_snmf_prop %>%
   select(code, ancestry, proportion, group) %>% 
   pivot_wider(names_from = ancestry, values_from = proportion) %>% 
   rowwise() %>% 
-  mutate(snmf_group = which.max(c(V1,V2,V3,V4,V5,V6))) %>% 
-  group_by(group) %>% 
-  arrange(desc(V3), V6, V1, V2, V4, V5, .by_group = T) %>% pull(code) %>% as.character()
+  group_by(code) %>% 
+  mutate(snmf_group = c("V1","V2","V3","V4","V5","V6")[which.max(c(V1,V2,V3,V4,V5,V6))]) %>% 
+  group_by(snmf_group) %>% 
+  arrange(desc(V3), V6, V1, V2, V4, V5, .by_group = T) 
+# %>% pull(code) %>% as.character()
 
 #### reorder vn samples
 vn_ord6 <- all_snmf_prop %>% 
@@ -251,11 +254,12 @@ vn_ord6 <- all_snmf_prop %>%
   mutate(ancestry = if_else(proportion < 0.001, "V6", ancestry)) %>% 
   mutate(ancestry = factor(ancestry, levels = c("V1", "V5", "V2", "V3", "V4", "V6"))) %>%
   group_by(ancestry) %>%
-  arrange(desc(proportion), .by_group = T) %>% pull(code)
+  arrange(desc(proportion), .by_group = T) 
+# %>% pull(code)
 
 
 
-ind_ord6 <- c(ref_ord6, vn_ord6)
+ind_ord6 <- c(ref_ord6$code, vn_ord6$code)
 
 #### match snmf ancestral group with prior ancestries
 ancestry_ord6 <- all_snmf_prop %>% 
@@ -283,7 +287,11 @@ all_snmf_prop6 <- all_snmf_prop %>%
   left_join(., ancestry_ord6, by = "ancestry") %>% 
   filter(k == 6) %>%
   mutate(code = factor(code, levels = ind_ord6)) %>% 
-  mutate(group = fct_relevel(group, names(group9_col))) %>% 
+  group_by(code) %>% 
+  mutate(group = if_else(group != "Vietnam", ancestry_ord6$new_ancestry[ancestry_ord6$ancestry == ancestry[which.max(proportion)]], 9)) %>% 
+  # rowwise() %>% 
+  mutate(group = names(group9_col)[group]) %>% 
+  # mutate(group = fct_relevel(group, names(group9_col)[sort(ancestry_ord6$new_ancestry)])) %>%
   mutate(new_ancestry_name = names(group9_col[group])) %>% 
   mutate(new_ancestry_name = case_when(new_ancestry_name %in% c("O", "B") ~ "OB",
                                        new_ancestry_name %in% c("E", "R") ~ "ER",
@@ -387,82 +395,13 @@ ggplot(all_snmf_prop5to8) +
   scale_y_continuous(expand = c(0, 0))
 
 
-#############
-## run PCA ##
-#############
-all_pca <- PCA(all_geno)
-
-## get PC1 and PC2
-all_pca_proj <- all_pca$ind$coord[,1:2]
-colnames(all_pca_proj) <- c("PC1", "PC2")
-all_pca_proj <- all_pca_proj %>% 
-  as.data.frame() %>% 
-  rownames_to_column("code") 
-
-all_pca_proj <- left_join(all_pca_proj, acc_info, by = "code")
-
-all_pca_proj <- all_pca_proj %>% 
-  mutate(group = ifelse(is.na(group), "Vietnam", group)) %>%
-  mutate(label = ifelse(group == "Vietnam", as.character(code), group)) %>% 
-  # mutate(group = factor(group, levels = names(group9_col))) %>% 
-  mutate(new_ancestry_name = names(group9_col[group])) %>% 
-  mutate(new_ancestry_name = case_when(new_ancestry_name %in% c("O", "B") ~ "OB",
-                                       new_ancestry_name %in% c("E", "R") ~ "ER",
-                                       TRUE ~ new_ancestry_name)) %>% 
-  mutate(new_ancestry_name = factor(new_ancestry_name, names(group6_col)))
-
-eigen <- all_pca$eig[,1]
-
-
-## plot PCA results
-# tiff(filename = file.path(plotdir, "pca_all.tiff"),
-#      width = 6, height = 5, units = "in", res = 1200)
-# pca1 <- all_pca_proj %>% 
-#   arrange(desc(group)) %>% 
-#   ggplot() +
-#   geom_point(aes(x = PC1, y = PC2, color = group, shape = group), size = 5) +
-#   # geom_text(aes(x = PC1, y = PC2, label = label, color = group)) +
-#   xlab(paste0("PC1 (", format(eigen[1]/sum(eigen)*100, digits = 2), "%)")) +
-#   ylab(paste0("PC2 (", format(eigen[2]/sum(eigen)*100, digits = 2), "%)")) +
-#   scale_color_manual(values = group9_col) + 
-#   scale_shape_manual(values = 0:8) +
-#   theme_minimal() + 
-#   theme(panel.border = element_rect(color = "gray", fill = NA),
-#         axis.title = element_text(size = 12))
-# pca1
-
-pca1 <- all_pca_proj %>%
-  arrange(desc(group)) %>%
-  ggplot() +
-  geom_point(aes(x = PC1, y = PC2,
-                 fill = new_ancestry_name), shape = 21, color = "black", alpha = 0.7, size = 3) +
-  # geom_text(aes(x = PC1, y = PC2, label = label, color = group)) +
-  xlab(paste0("PC1 (", format(eigen[1]/sum(eigen)*100, digits = 2), "%)")) +
-  ylab(paste0("PC2 (", format(eigen[2]/sum(eigen)*100, digits = 2), "%)")) +
-  # scale_color_manual(values = c(as.character(group6_col), "gold3")) +
-  # scale_color_manual(values = c(rep("black", 9), "gold3")) +
-  scale_fill_manual(values = group6_col) +
-  guides(fill = guide_legend(title = "group")) +
-  # scale_shape_manual(values = group6_shape) +
-  # scale_size_manual(values = c(rep(3, 9), 2)) +
-  # scale_alpha_manual(values = c(rep(1, 8), 0.7, 1)) +
-  theme_minimal() +
-  theme(panel.border = element_rect(color = "gray", fill = NA),
-        axis.title = element_text(size = 12))
-
-tiff(filename = file.path(plotdir, "pca_all.tiff"),
-     width = 8, height = 7, units = "in", res = 800)
-pca1
-dev.off()
-
-
 ###################
 ## NJ clustering ##
 ###################
 
 ## euclidean distance
 all_geno[all_geno == 9] <- NA
-all_dist <- dist(all_geno, method = "euclidean")
+all_dist <- stats::dist(all_geno, method = "euclidean")
 
 ## nj tree
 nj_tree <- ape::nj(all_dist)
@@ -474,7 +413,7 @@ nj_tree <- ape::nj(all_dist)
 
 nj1 <- ggtree(nj_tree, ladderize = F, layout = "ape", color = "gray") %<+% (all_snmf_prop6 %>% distinct(code, .keep_all = T)) +
   # geom_tiplab(aes(subset = grepl("S-", label), color = group), hjust = -0.5,
-  #             linesize = .2, size = 5) +
+              # linesize = .2, size = 5) +
   geom_tippoint(aes(color = new_ancestry_name, size = new_ancestry_name, alpha = new_ancestry_name)) +
   guides(color = guide_legend(title = "group"),
          size = guide_legend(title = "group"),
@@ -486,6 +425,7 @@ nj1 <- ggtree(nj_tree, ladderize = F, layout = "ape", color = "gray") %<+% (all_
   scale_x_reverse(expand = c(0.02,0.02)) +
   scale_y_reverse(expand = c(0.02,0.02))
 nj1
+
 
 
 #################
@@ -500,7 +440,7 @@ rob_countries_names <- c("Ivory Coast", "Cameroon", "Angola",
                          "Uganda", "Democratic Republic of the Congo")
 rob_countries <- africa %>% filter(sovereignt %in% rob_countries_names)
 rob_countries[8,] <- rob_countries[4,]
-rob_countries$sovereignt[8] <- paste("North", rob_countries$sovereignt[4])
+rob_countries$sovereignt[8] <- paste("North", rob_countries$sovereignt[5])
 rob_groups <- sapply(rob_countries$sovereignt, function(n) {
   g <- case_when(n == "Uganda" ~ "O",
                  n == "Gabon" ~ "A",
@@ -562,8 +502,8 @@ snmf_plots <- plot_grid(ref_snmf6, blank, vn_snmf6, nrow = 3, ncol = 1,
                         labels = c("B", "", "C"))
 # pdf(file.path(plotdir, "map_nj_snmf.pdf"),
 #     width = 12, height = 12)
-tiff(file.path(plotdir, "map_nj_snmf.tiff"),
-    width = 10, height = 10, units = "in", res = 1200)
+png(file.path(plotdir, "map_nj_snmf.png"),
+     width = 10, height = 10, units = "in", res = 400)
 plot_grid(map_tree, blank, snmf_plots, nrow = 3, ncol = 1, 
           rel_heights = c(0.4, 0.05, 0.7))
 dev.off()
@@ -716,7 +656,7 @@ bs_stats %>%
   # set_background_color(1, everywhere, "gray80") %>% 
   set_text_color(1, 2:10, group9_col) %>%
   quick_docx(file = "statistics.docx")
-  # quick_html(file = "statistics.html")
+# quick_html(file = "statistics.html")
 
 
 bs_stats <- as.data.frame(rbind(as.numeric(sprintf("%d", all_sum$n.by.pop)),
